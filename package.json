@@ -3,27 +3,37 @@
   "displayName": "vsWT — Worktree Orchestrator",
   "description": "Run parallel Claude Code sessions, each in its own git worktree, from the VS Code sidebar.",
   "version": "0.0.1",
-  "publisher": "vana-savych",
+  "publisher": "vana123",
   "license": "MIT",
   "engines": {
     "vscode": "^1.95.0"
   },
   "categories": [
-    "Other",
     "AI",
-    "SCM Providers"
+    "SCM Providers",
+    "Other"
   ],
   "keywords": [
     "claude",
     "claude code",
     "agents",
     "git worktree",
-    "parallel"
+    "parallel",
+    "anthropic"
   ],
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0f0f0f",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/vana123/vswt.git"
   },
+  "bugs": {
+    "url": "https://github.com/vana123/vswt/issues"
+  },
+  "homepage": "https://github.com/vana123/vswt#readme",
   "main": "./dist/extension.js",
   "activationEvents": [
     "onView:vswt.sidebar"
@@ -50,18 +60,57 @@
       ]
     },
     "commands": [
-      { "command": "vswt.openSidebar",        "title": "Open Sidebar",         "category": "vsWT" },
-      { "command": "vswt.createWorktree",     "title": "New Worktree…",        "category": "vsWT", "icon": "$(add)" },
-      { "command": "vswt.refreshWorktrees",   "title": "Refresh",              "category": "vsWT", "icon": "$(refresh)" },
-      { "command": "vswt.pickRepo",           "title": "Pick Repository…",     "category": "vsWT", "icon": "$(repo)" },
-      { "command": "vswt.startClaudeSession", "title": "Start Claude Session", "category": "vsWT" },
-      { "command": "vswt.startShellSession",  "title": "Start Shell Session",  "category": "vsWT" }
+      {
+        "command": "vswt.openSidebar",
+        "title": "Open Sidebar",
+        "category": "vsWT"
+      },
+      {
+        "command": "vswt.createWorktree",
+        "title": "New Worktree…",
+        "category": "vsWT",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vswt.refreshWorktrees",
+        "title": "Refresh",
+        "category": "vsWT",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vswt.pickRepo",
+        "title": "Pick Repository…",
+        "category": "vsWT",
+        "icon": "$(repo)"
+      },
+      {
+        "command": "vswt.startClaudeSession",
+        "title": "Start Claude Session",
+        "category": "vsWT"
+      },
+      {
+        "command": "vswt.startShellSession",
+        "title": "Start Shell Session",
+        "category": "vsWT"
+      }
     ],
     "menus": {
       "view/title": [
-        { "command": "vswt.createWorktree",   "when": "view == vswt.sidebar", "group": "navigation@1" },
-        { "command": "vswt.refreshWorktrees", "when": "view == vswt.sidebar", "group": "navigation@2" },
-        { "command": "vswt.pickRepo",         "when": "view == vswt.sidebar", "group": "1_config@1" }
+        {
+          "command": "vswt.createWorktree",
+          "when": "view == vswt.sidebar",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vswt.refreshWorktrees",
+          "when": "view == vswt.sidebar",
+          "group": "navigation@2"
+        },
+        {
+          "command": "vswt.pickRepo",
+          "when": "view == vswt.sidebar",
+          "group": "1_config@1"
+        }
       ]
     },
     "configuration": {
@@ -115,11 +164,26 @@
           "description": "Additional shell options exposed as session buttons (e.g. Git Bash, CMD on Windows). When unset, sensible platform defaults are used; set to [] to hide all extras.",
           "items": {
             "type": "object",
-            "required": ["name", "command"],
+            "required": [
+              "name",
+              "command"
+            ],
             "properties": {
-              "name": { "type": "string", "description": "Display label, e.g. \"Git Bash\"." },
-              "command": { "type": "string", "description": "Absolute path to the shell binary." },
-              "args": { "type": "array", "items": { "type": "string" }, "description": "Optional arguments." }
+              "name": {
+                "type": "string",
+                "description": "Display label, e.g. \"Git Bash\"."
+              },
+              "command": {
+                "type": "string",
+                "description": "Absolute path to the shell binary."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Optional arguments."
+              }
             }
           }
         }
@@ -138,6 +202,7 @@
     "@types/vscode": "^1.95.0",
     "@vscode/vsce": "^3.2.0",
     "esbuild": "^0.24.0",
+    "sharp": "^0.34.5",
     "typescript": "^5.6.0"
   },
   "dependencies": {

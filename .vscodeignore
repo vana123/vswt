@@ -3,6 +3,7 @@
 .claude/**
 src/**
 webview-ui/**
+scripts/**
 node_modules/**
 **/*.ts
 **/*.tsx
@@ -12,3 +13,4 @@ esbuild.mjs
 .gitignore
 .eslintrc*
 .prettierrc*
+media/marketplace-icon.svg
