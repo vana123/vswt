@@ -1,0 +1,495 @@
+@import url('https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  --pixel-font: 'Pixelify Sans', 'Press Start 2P', var(--vscode-font-family), monospace;
+  --gap: 6px;
+  --claude-orange: #d97757;
+  --shell-green: #5fb878;
+  --pixel-shadow: 2px 2px 0 var(--vscode-widget-shadow, rgba(0,0,0,0.35));
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 8px 6px;
+  font-family: var(--pixel-font);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--vscode-foreground);
+  background: transparent;
+  user-select: none;
+  -webkit-font-smoothing: never;
+  font-smooth: never;
+  text-rendering: geometricPrecision;
+}
+
+/* Generic icon container — Lucide line icons render smoothly here. */
+.icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.icon-claude {
+  /* Anthropic logo is a filled glyph; let it render normally. */
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ─────────── Repo Header ─────────── */
+.repo-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 6px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 2px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent));
+}
+
+.repo-icon { opacity: 0.7; }
+.repo-name {
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.link {
+  background: none;
+  border: none;
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  text-decoration: underline;
+  letter-spacing: 0.05em;
+}
+.link:hover { color: var(--vscode-textLink-activeForeground); }
+
+/* ─────────── Filter ─────────── */
+.filter-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.filter-icon {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.filter {
+  flex: 1;
+  font: inherit;
+  font-size: 12px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 2px solid var(--vscode-input-border, var(--vscode-widget-border, transparent));
+  border-radius: 0;
+  padding: 4px 8px 4px 22px;
+  outline: none;
+}
+.filter:focus { border-color: var(--vscode-focusBorder); }
+
+/* ─────────── Empty State ─────────── */
+.empty {
+  padding: 20px 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+.empty p { margin: 0; opacity: 0.7; }
+
+/* ─────────── Cards ─────────── */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--vscode-list-inactiveSelectionBackground, var(--vscode-sideBarSectionHeader-background));
+  border: 2px solid var(--vscode-widget-border, transparent);
+  border-radius: 0;
+  box-shadow: var(--pixel-shadow);
+  transition: border-color 0.1s;
+}
+.card:hover {
+  border-color: var(--vscode-focusBorder, var(--vscode-list-focusOutline));
+}
+.card.pinned {
+  border-left: 4px solid var(--claude-orange);
+}
+
+/* ─────────── Card Header ─────────── */
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pin-btn {
+  background: none;
+  border: 2px solid transparent;
+  border-radius: 0;
+  padding: 2px;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.35;
+  color: var(--vscode-foreground);
+}
+.pin-btn:hover { opacity: 1; background: var(--vscode-toolbar-hoverBackground); }
+.pin-btn.is-pinned {
+  opacity: 1;
+  color: var(--claude-orange);
+}
+
+.branch-icon {
+  display: inline-flex;
+  opacity: 0.7;
+}
+
+.branch-name {
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  cursor: text;
+  letter-spacing: 0.02em;
+}
+
+.branch-base {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.55;
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.branch-input {
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  flex: 1;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 2px solid var(--vscode-focusBorder);
+  border-radius: 0;
+  padding: 1px 4px;
+  outline: none;
+  min-width: 0;
+}
+
+.header-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+/* ─────────── Status Badges ─────────── */
+.status-badge-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+.status-badge-btn:hover { opacity: 0.85; }
+
+.status-badge {
+  display: inline-flex;
+  gap: 5px;
+  font-size: 12px;
+  align-items: center;
+  font-feature-settings: 'tnum';
+  letter-spacing: 0.03em;
+}
+.status-badge.clean { opacity: 0.35; }
+.status-badge .dirty { color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); }
+.status-badge .ahead { color: var(--vscode-gitDecoration-stageModifiedResourceForeground, #5fb878); }
+.status-badge .behind { color: var(--vscode-gitDecoration-conflictingResourceForeground, #c74e39); }
+
+/* ─────────── Files List ─────────── */
+.files {
+  list-style: none;
+  margin: 0;
+  padding: 4px 4px 4px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-left: 2px solid var(--vscode-widget-border, transparent);
+  margin-left: 8px;
+}
+
+.file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: 0;
+  cursor: pointer;
+  font-size: 12px;
+}
+.file:hover { background: var(--vscode-list-hoverBackground); }
+
+.file-status {
+  width: 14px;
+  text-align: center;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 11px;
+  font-weight: 700;
+}
+.file-status.modified { color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); }
+.file-status.added { color: var(--vscode-gitDecoration-addedResourceForeground, #5fb878); }
+.file-status.deleted { color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39); }
+.file-status.untracked { color: var(--vscode-gitDecoration-untrackedResourceForeground, #999); }
+.file-status.renamed { color: var(--vscode-gitDecoration-renamedResourceForeground, #5fb878); }
+
+.file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─────────── Sessions ─────────── */
+.empty-sessions {
+  font-size: 11px;
+  opacity: 0.4;
+  padding: 4px 6px;
+  text-align: center;
+  border-top: 1px dashed var(--vscode-widget-border, transparent);
+  border-bottom: 1px dashed var(--vscode-widget-border, transparent);
+}
+
+.sessions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-top: 1px dashed var(--vscode-widget-border, transparent);
+  border-bottom: 1px dashed var(--vscode-widget-border, transparent);
+  padding: 3px 0;
+}
+
+.session {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  cursor: pointer;
+  font-size: 12.5px;
+  border: 2px solid transparent;
+}
+.session:hover {
+  background: var(--vscode-list-hoverBackground);
+  border-color: var(--vscode-list-focusOutline, transparent);
+}
+.session.exited { opacity: 0.4; }
+.session.stopped { opacity: 0.7; }
+.session.stopped:hover { opacity: 1; }
+.session.stopped .session-icon { color: var(--vscode-textLink-foreground); }
+.session.claude .session-icon { color: var(--claude-orange); }
+
+.session-icon { width: 14px; display: inline-flex; justify-content: center; }
+.session-label { flex: 1; }
+.session-time { font-size: 11px; opacity: 0.55; letter-spacing: 0.03em; }
+
+/* ─────────── Actions ─────────── */
+.actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.primary-actions {
+  /* Most-used row stays visually distinct */
+}
+
+.git-actions {
+  border-top: 1px dashed var(--vscode-widget-border, transparent);
+  padding-top: 6px;
+  margin-top: 2px;
+}
+
+.divider {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  background: var(--vscode-widget-border, transparent);
+  margin: 0 2px;
+}
+
+button {
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  padding: 3px 8px;
+  border: 2px solid var(--vscode-button-border, transparent);
+  border-radius: 0;
+  cursor: pointer;
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1.3;
+}
+button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px; }
+
+button.primary {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+button.primary:hover { background: var(--vscode-button-hoverBackground); }
+
+button.action {
+  font-weight: 600;
+  padding: 4px 10px;
+}
+
+button.action.claude-action {
+  border-color: var(--claude-orange);
+}
+button.action.claude-action:hover {
+  background: rgba(217, 119, 87, 0.15);
+}
+
+/* ─────────── Shell Picker (dropdown) ─────────── */
+.shell-picker {
+  position: relative;
+  display: inline-block;
+}
+
+.shell-toggle .caret {
+  font-size: 10px;
+  margin-left: 2px;
+  opacity: 0.7;
+  transition: transform 0.1s;
+}
+.shell-toggle.open .caret {
+  transform: rotate(180deg);
+}
+
+.shell-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 50;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  background: var(--vscode-dropdown-background, var(--vscode-menu-background, var(--vscode-editor-background)));
+  color: var(--vscode-dropdown-foreground, var(--vscode-menu-foreground));
+  border: 2px solid var(--vscode-dropdown-border, var(--vscode-focusBorder, transparent));
+  border-radius: 0;
+  box-shadow: var(--pixel-shadow);
+  padding: 2px;
+}
+
+.menu-item {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  white-space: nowrap;
+}
+.menu-item:hover {
+  background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground));
+}
+.menu-item:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: -2px;
+}
+
+.menu-label {
+  flex: 1;
+}
+
+.menu-hint {
+  font-size: 10px;
+  opacity: 0.55;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  opacity: 0.7;
+}
+button.ghost:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  opacity: 1;
+}
+button.ghost.danger:hover {
+  color: var(--vscode-errorForeground, #c74e39);
+}
+
+button.icon-btn {
+  padding: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stop {
+  width: 18px;
+  height: 18px;
+}
+
+.new-wt {
+  align-self: stretch;
+  padding: 6px;
+  margin-top: 4px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}

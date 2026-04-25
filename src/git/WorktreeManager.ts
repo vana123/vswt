@@ -105,6 +105,77 @@ export class WorktreeManager {
     output.appendLine(`[vsWT] ✓ removed`);
   }
 
+  async rename(
+    oldPath: string,
+    oldBranch: string,
+    newBranch: string,
+    output: vscode.OutputChannel
+  ): Promise<WorktreeRecord> {
+    const settings = getSettings();
+    const newPath = this.resolveTargetPath(newBranch, settings.worktreeParentDir);
+    output.appendLine(`[vsWT] renaming '${oldBranch}' → '${newBranch}'`);
+    output.appendLine(`[vsWT]   path: ${oldPath} → ${newPath}`);
+
+    if (oldPath === newPath && oldBranch === newBranch) {
+      return { branch: oldBranch, path: oldPath };
+    }
+
+    const git = new GitOps(this.repoRoot);
+
+    if (oldBranch !== newBranch && oldBranch !== '(detached)') {
+      if (await git.branchExists(newBranch)) {
+        throw new Error(`Branch '${newBranch}' already exists`);
+      }
+      await git.renameBranch(oldBranch, newBranch);
+      output.appendLine(`[vsWT]   ✓ branch renamed`);
+    }
+
+    if (oldPath !== newPath) {
+      try {
+        await git.moveWorktree(oldPath, newPath);
+        output.appendLine(`[vsWT]   ✓ worktree moved`);
+      } catch (err) {
+        const msg = (err as Error).message;
+        // `git worktree move` blocks worktrees with submodules unconditionally;
+        // fall back to fs.rename + `git worktree repair` for those cases.
+        if (/submodule/i.test(msg)) {
+          output.appendLine(`[vsWT]   git worktree move blocked by submodules; trying manual move`);
+          try {
+            await fs.mkdir(path.dirname(newPath), { recursive: true });
+            await fs.rename(oldPath, newPath);
+            await git.repairWorktrees();
+            await git.pruneWorktrees();
+            output.appendLine(`[vsWT]   ✓ moved manually + repaired metadata`);
+            output.appendLine(`[vsWT]   note: re-run 'git submodule update --init' in new path if submodules misbehave`);
+          } catch (manualErr) {
+            if (oldBranch !== newBranch && oldBranch !== '(detached)') {
+              try {
+                await git.renameBranch(newBranch, oldBranch);
+                output.appendLine(`[vsWT]   reverted branch rename`);
+              } catch {
+                // ignore revert failure
+              }
+            }
+            throw new Error(`Move failed (manual fallback also): ${(manualErr as Error).message}`);
+          }
+        } else {
+          if (oldBranch !== newBranch && oldBranch !== '(detached)') {
+            try {
+              await git.renameBranch(newBranch, oldBranch);
+              output.appendLine(`[vsWT]   reverted branch rename after move failure`);
+            } catch {
+              // ignore revert failure
+            }
+          }
+          throw err;
+        }
+      }
+    }
+
+    output.appendLine(`[vsWT] ✓ renamed`);
+    return { branch: newBranch, path: newPath };
+  }
+
   async list(): Promise<WorktreeRecord[]> {
     const all = await new GitOps(this.repoRoot).listWorktrees();
     return all

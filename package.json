@@ -41,7 +41,7 @@
     "views": {
       "vswt": [
         {
-          "type": "tree",
+          "type": "webview",
           "id": "vswt.sidebar",
           "name": "Worktrees",
           "icon": "media/icon.svg",
@@ -50,169 +50,18 @@
       ]
     },
     "commands": [
-      {
-        "command": "vswt.openSidebar",
-        "title": "Open Sidebar",
-        "category": "vsWT"
-      },
-      {
-        "command": "vswt.createWorktree",
-        "title": "New Worktree…",
-        "category": "vsWT",
-        "icon": "$(add)"
-      },
-      {
-        "command": "vswt.refreshWorktrees",
-        "title": "Refresh",
-        "category": "vsWT",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "vswt.pickRepo",
-        "title": "Pick Repository…",
-        "category": "vsWT",
-        "icon": "$(repo)"
-      },
-      {
-        "command": "vswt.removeWorktree",
-        "title": "Remove Worktree…",
-        "category": "vsWT"
-      },
-      {
-        "command": "vswt.openWorktree",
-        "title": "Open in New Window",
-        "category": "vsWT"
-      },
-      {
-        "command": "vswt.openWorktreeCurrentWindow",
-        "title": "Open in Current Window",
-        "category": "vsWT"
-      },
-      {
-        "command": "vswt.openTerminalInWorktree",
-        "title": "Open Plain Terminal",
-        "category": "vsWT"
-      },
-      {
-        "command": "vswt.startClaudeSession",
-        "title": "Start Claude Session",
-        "category": "vsWT",
-        "icon": "$(sparkle)"
-      },
-      {
-        "command": "vswt.startShellSession",
-        "title": "Start Shell Session",
-        "category": "vsWT",
-        "icon": "$(terminal)"
-      },
-      {
-        "command": "vswt.showSession",
-        "title": "Show Session Terminal",
-        "category": "vsWT"
-      },
-      {
-        "command": "vswt.stopSession",
-        "title": "Stop Session",
-        "category": "vsWT",
-        "icon": "$(stop-circle)"
-      }
+      { "command": "vswt.openSidebar",        "title": "Open Sidebar",         "category": "vsWT" },
+      { "command": "vswt.createWorktree",     "title": "New Worktree…",        "category": "vsWT", "icon": "$(add)" },
+      { "command": "vswt.refreshWorktrees",   "title": "Refresh",              "category": "vsWT", "icon": "$(refresh)" },
+      { "command": "vswt.pickRepo",           "title": "Pick Repository…",     "category": "vsWT", "icon": "$(repo)" },
+      { "command": "vswt.startClaudeSession", "title": "Start Claude Session", "category": "vsWT" },
+      { "command": "vswt.startShellSession",  "title": "Start Shell Session",  "category": "vsWT" }
     ],
     "menus": {
       "view/title": [
-        {
-          "command": "vswt.createWorktree",
-          "when": "view == vswt.sidebar",
-          "group": "navigation@1"
-        },
-        {
-          "command": "vswt.refreshWorktrees",
-          "when": "view == vswt.sidebar",
-          "group": "navigation@2"
-        },
-        {
-          "command": "vswt.pickRepo",
-          "when": "view == vswt.sidebar",
-          "group": "1_config@1"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "vswt.startClaudeSession",
-          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
-          "group": "inline@1"
-        },
-        {
-          "command": "vswt.startShellSession",
-          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
-          "group": "inline@2"
-        },
-        {
-          "command": "vswt.startClaudeSession",
-          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
-          "group": "1_session@1"
-        },
-        {
-          "command": "vswt.startShellSession",
-          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
-          "group": "1_session@2"
-        },
-        {
-          "command": "vswt.openTerminalInWorktree",
-          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
-          "group": "1_session@3"
-        },
-        {
-          "command": "vswt.openWorktreeCurrentWindow",
-          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
-          "group": "2_open@1"
-        },
-        {
-          "command": "vswt.openWorktree",
-          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
-          "group": "2_open@2"
-        },
-        {
-          "command": "vswt.removeWorktree",
-          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
-          "group": "9_remove@1"
-        },
-        {
-          "command": "vswt.stopSession",
-          "when": "view == vswt.sidebar && viewItem == vswt.session",
-          "group": "inline@1"
-        },
-        {
-          "command": "vswt.showSession",
-          "when": "view == vswt.sidebar && viewItem == vswt.session",
-          "group": "1_session@1"
-        },
-        {
-          "command": "vswt.stopSession",
-          "when": "view == vswt.sidebar && viewItem == vswt.session",
-          "group": "9_remove@1"
-        }
-      ],
-      "commandPalette": [
-        {
-          "command": "vswt.openWorktree",
-          "when": "false"
-        },
-        {
-          "command": "vswt.openWorktreeCurrentWindow",
-          "when": "false"
-        },
-        {
-          "command": "vswt.openTerminalInWorktree",
-          "when": "false"
-        },
-        {
-          "command": "vswt.showSession",
-          "when": "false"
-        },
-        {
-          "command": "vswt.stopSession",
-          "when": "false"
-        }
+        { "command": "vswt.createWorktree",   "when": "view == vswt.sidebar", "group": "navigation@1" },
+        { "command": "vswt.refreshWorktrees", "when": "view == vswt.sidebar", "group": "navigation@2" },
+        { "command": "vswt.pickRepo",         "when": "view == vswt.sidebar", "group": "1_config@1" }
       ]
     },
     "configuration": {
@@ -259,6 +108,20 @@
           "type": "string",
           "default": "claude",
           "description": "Path or command name for the Claude Code CLI."
+        },
+        "vswt.extraShells": {
+          "type": "array",
+          "default": null,
+          "description": "Additional shell options exposed as session buttons (e.g. Git Bash, CMD on Windows). When unset, sensible platform defaults are used; set to [] to hide all extras.",
+          "items": {
+            "type": "object",
+            "required": ["name", "command"],
+            "properties": {
+              "name": { "type": "string", "description": "Display label, e.g. \"Git Bash\"." },
+              "command": { "type": "string", "description": "Absolute path to the shell binary." },
+              "args": { "type": "array", "items": { "type": "string" }, "description": "Optional arguments." }
+            }
+          }
         }
       }
     }
@@ -266,7 +129,7 @@
   "scripts": {
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.webview.json --noEmit",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package"
   },
@@ -278,6 +141,8 @@
     "typescript": "^5.6.0"
   },
   "dependencies": {
-    "node-pty": "^1.1.0"
+    "@preact/signals": "^2.9.0",
+    "node-pty": "^1.1.0",
+    "preact": "^10.29.1"
   }
 }

@@ -2,8 +2,10 @@
 .github/**
 .claude/**
 src/**
+webview-ui/**
 node_modules/**
 **/*.ts
+**/*.tsx
 **/*.map
 tsconfig*.json
 esbuild.mjs

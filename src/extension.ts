@@ -1,114 +1,61 @@
 import * as vscode from 'vscode';
+import * as path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { GitOps } from './git/GitOps';
 import { WorktreeManager } from './git/WorktreeManager';
-import { SessionRegistry, SessionInfo, AgentType, AgentState } from './SessionRegistry';
+import { SessionRegistry, AgentType } from './SessionRegistry';
+import { SidebarHost } from './webview/SidebarHost';
+import { getSettings, initSettings } from './Settings';
+import type { AppState, RpcRequest, WorktreeDTO, SessionDTO, ExtraShellDTO } from './webview/protocol';
 
-const SESSION_STATE_META: Record<AgentState, { icon: string; desc: string }> = {
-  running: { icon: 'pulse',        desc: '' },
-  exited:  { icon: 'circle-slash', desc: 'exited' }
-};
+const execFileAsync = promisify(execFile);
+const MAX_FILES_PER_WORKTREE = 50;
 
 const STATE_KEY_REPO = 'vswt.selectedRepo';
+const STATE_KEY_PINNED = 'vswt.pinnedPaths';
+const STATE_KEY_BASES = 'vswt.worktreeBases';
 
-type TreeNode =
-  | { kind: 'pick-repo' }
-  | { kind: 'message'; text: string; icon?: string }
-  | { kind: 'worktree'; branch: string; path: string }
-  | { kind: 'session'; session: SessionInfo };
+function getPinnedPaths(context: vscode.ExtensionContext): Set<string> {
+  return new Set(context.workspaceState.get<string[]>(STATE_KEY_PINNED) ?? []);
+}
 
-class WorktreeTreeProvider implements vscode.TreeDataProvider<TreeNode> {
-  private readonly _onDidChange = new vscode.EventEmitter<TreeNode | void>();
-  public readonly onDidChangeTreeData = this._onDidChange.event;
+async function setPinned(context: vscode.ExtensionContext, path: string, pinned: boolean): Promise<void> {
+  const set = getPinnedPaths(context);
+  if (pinned) set.add(path);
+  else set.delete(path);
+  await context.workspaceState.update(STATE_KEY_PINNED, [...set]);
+}
 
-  constructor(
-    private readonly context: vscode.ExtensionContext,
-    private readonly registry: SessionRegistry
-  ) {
-    registry.onChange(() => this._onDidChange.fire());
-  }
+function getBases(context: vscode.ExtensionContext): Record<string, string> {
+  return { ...(context.workspaceState.get<Record<string, string>>(STATE_KEY_BASES) ?? {}) };
+}
 
-  refresh(): void {
-    this._onDidChange.fire();
-  }
+async function setBase(context: vscode.ExtensionContext, worktreePath: string, base: string): Promise<void> {
+  const bases = getBases(context);
+  bases[worktreePath] = base;
+  await context.workspaceState.update(STATE_KEY_BASES, bases);
+}
 
-  getTreeItem(node: TreeNode): vscode.TreeItem {
-    if (node.kind === 'pick-repo') {
-      const item = new vscode.TreeItem('Pick repository…', vscode.TreeItemCollapsibleState.None);
-      item.iconPath = new vscode.ThemeIcon('repo');
-      item.command = { command: 'vswt.pickRepo', title: 'Pick repository' };
-      return item;
-    }
-    if (node.kind === 'message') {
-      const item = new vscode.TreeItem(node.text, vscode.TreeItemCollapsibleState.None);
-      item.iconPath = new vscode.ThemeIcon(node.icon ?? 'info');
-      return item;
-    }
-    if (node.kind === 'worktree') {
-      const sessions = this.registry.forWorktree(node.path);
-      const state = sessions.length > 0
-        ? vscode.TreeItemCollapsibleState.Expanded
-        : vscode.TreeItemCollapsibleState.Collapsed;
-      const item = new vscode.TreeItem(node.branch, state);
-      item.id = `wt:${node.path}`;
-      item.description = describeWorktreeAggregate(sessions);
-      item.tooltip = new vscode.MarkdownString(`**${node.branch}**\n\n\`${node.path}\``);
-      item.iconPath = new vscode.ThemeIcon(pickWorktreeIcon(sessions));
-      item.contextValue = 'vswt.worktree';
-      item.resourceUri = vscode.Uri.file(node.path);
-      return item;
-    }
-    const s = node.session;
-    const label = s.agentType === 'claude' ? 'Claude' : 'Shell';
-    const meta = SESSION_STATE_META[s.state];
-    const description = meta.desc ? `${s.branch} · ${meta.desc}` : s.branch;
-    const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
-    item.id = `sess:${s.id}`;
-    item.iconPath = new vscode.ThemeIcon(meta.icon);
-    item.description = description;
-    item.contextValue = 'vswt.session';
-    item.tooltip = new vscode.MarkdownString(
-      `**${label}** · ${s.branch}\n\nState: \`${s.state}\`\n\nPath: \`${s.worktreePath}\``
-    );
-    item.command = {
-      command: 'vswt.showSession',
-      title: 'Show Session',
-      arguments: [node]
-    };
-    return item;
-  }
-
-  async getChildren(parent?: TreeNode): Promise<TreeNode[]> {
-    if (!parent) {
-      const repoRoot = await getCurrentRepo(this.context);
-      if (!repoRoot) return [{ kind: 'pick-repo' }];
-      try {
-        const list = await new WorktreeManager(repoRoot).list();
-        if (list.length === 0) {
-          return [{ kind: 'message', text: 'No worktrees. Click + to create.', icon: 'info' }];
-        }
-        return list.map(w => ({ kind: 'worktree' as const, branch: w.branch, path: w.path }));
-      } catch (err) {
-        return [{ kind: 'message', text: `Error: ${(err as Error).message}`, icon: 'warning' }];
-      }
-    }
-    if (parent.kind === 'worktree') {
-      const sessions = this.registry.forWorktree(parent.path);
-      if (sessions.length === 0) {
-        return [{ kind: 'message', text: '(no sessions — right-click to start)', icon: 'circle-large-outline' }];
-      }
-      return sessions.map(s => ({ kind: 'session' as const, session: s }));
-    }
-    return [];
+async function deleteBase(context: vscode.ExtensionContext, worktreePath: string): Promise<void> {
+  const bases = getBases(context);
+  if (worktreePath in bases) {
+    delete bases[worktreePath];
+    await context.workspaceState.update(STATE_KEY_BASES, bases);
   }
 }
 
-function describeWorktreeAggregate(sessions: SessionInfo[]): string {
-  if (sessions.length === 0) return '';
-  return `${sessions.length}`;
-}
-
-function pickWorktreeIcon(_sessions: SessionInfo[]): string {
-  return 'git-branch';
+async function moveBase(
+  context: vscode.ExtensionContext,
+  oldPath: string,
+  newPath: string
+): Promise<void> {
+  const bases = getBases(context);
+  if (oldPath in bases) {
+    bases[newPath] = bases[oldPath]!;
+    delete bases[oldPath];
+    await context.workspaceState.update(STATE_KEY_BASES, bases);
+  }
 }
 
 async function getCurrentRepo(context: vscode.ExtensionContext): Promise<string | null> {
@@ -128,7 +75,6 @@ async function getCurrentRepo(context: vscode.ExtensionContext): Promise<string 
       return root;
     }
   }
-
   return null;
 }
 
@@ -171,10 +117,89 @@ async function ensureRepo(context: vscode.ExtensionContext): Promise<string | nu
   return (await getCurrentRepo(context)) ?? (await pickRepo(context));
 }
 
-async function createWorktreeCommand(
+async function buildState(
+  context: vscode.ExtensionContext,
+  registry: SessionRegistry
+): Promise<AppState> {
+  const repoRoot = await getCurrentRepo(context);
+  if (!repoRoot) {
+    return { repoLabel: '', worktrees: [], sessions: [], extraShells: [] };
+  }
+
+  const repoLabel = path.basename(repoRoot);
+  const pinned = getPinnedPaths(context);
+  const bases = getBases(context);
+  let worktrees: WorktreeDTO[] = [];
+  try {
+    const list = await new WorktreeManager(repoRoot).list();
+    worktrees = await Promise.all(
+      list.map(async w => {
+        const base = bases[w.path] ?? null;
+        try {
+          const wgit = new GitOps(w.path);
+          const [status, files] = await Promise.all([
+            wgit.statusInfo(),
+            wgit.statusFiles()
+          ]);
+          return {
+            branch: w.branch,
+            path: w.path,
+            pinned: pinned.has(w.path),
+            base,
+            status: {
+              modified: status.modified,
+              untracked: status.untracked,
+              ahead: status.ahead,
+              behind: status.behind,
+              files: files.slice(0, MAX_FILES_PER_WORKTREE)
+            }
+          } satisfies WorktreeDTO;
+        } catch {
+          return {
+            branch: w.branch,
+            path: w.path,
+            pinned: pinned.has(w.path),
+            base
+          } satisfies WorktreeDTO;
+        }
+      })
+    );
+    worktrees.sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return a.branch.localeCompare(b.branch);
+    });
+  } catch {
+    worktrees = [];
+  }
+
+  const sessions: SessionDTO[] = [];
+  for (const w of worktrees) {
+    for (const s of registry.forWorktree(w.path)) {
+      sessions.push({
+        id: s.id,
+        worktreePath: s.worktreePath,
+        branch: s.branch,
+        agentType: s.agentType,
+        label: s.label,
+        state: s.state,
+        createdAt: s.createdAt
+      });
+    }
+  }
+
+  const extraShells: ExtraShellDTO[] = getSettings().extraShells.map(s => ({
+    name: s.name,
+    command: s.command,
+    args: s.args ?? []
+  }));
+
+  return { repoLabel, worktrees, sessions, extraShells };
+}
+
+async function createWorktreeFlow(
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
-  tree: WorktreeTreeProvider
+  refresh: () => Promise<void>
 ): Promise<void> {
   const repoRoot = await ensureRepo(context);
   if (!repoRoot) return;
@@ -186,6 +211,34 @@ async function createWorktreeCommand(
   });
   if (!branch) return;
 
+  // Pick base ref to branch off from.
+  let fromRef: string | undefined;
+  try {
+    const branches = await new GitOps(repoRoot).listBranches();
+    const current = branches.find(b => b.isCurrent);
+    type RefItem = { label: string; description?: string; ref?: string };
+    const items: RefItem[] = [];
+    items.push({
+      label: '$(git-branch) Current HEAD',
+      description: current ? current.name : '(detached)'
+    });
+    for (const b of branches) {
+      if (b.isCurrent || b.isRemote) continue;
+      items.push({ label: b.name, description: 'local' });
+    }
+    for (const b of branches) {
+      if (!b.isRemote) continue;
+      items.push({ label: b.name, description: 'remote' });
+    }
+    const baseChoice = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Branch off from…'
+    });
+    if (!baseChoice) return;
+    fromRef = baseChoice.label.startsWith('$(git-branch)') ? undefined : baseChoice.label;
+  } catch {
+    // Listing branches failed — fall back to current HEAD silently.
+  }
+
   const copyChoice = await vscode.window.showQuickPick(
     [
       { label: 'No', value: false, description: 'Skip secrets/config copy' },
@@ -196,12 +249,32 @@ async function createWorktreeCommand(
   if (!copyChoice) return;
 
   output.show(true);
-  const manager = new WorktreeManager(repoRoot);
   try {
-    const result = await manager.create({ branch: branch.trim(), copyEnv: copyChoice.value, output });
-    tree.refresh();
+    const opts: Parameters<WorktreeManager['create']>[0] = {
+      branch: branch.trim(),
+      copyEnv: copyChoice.value,
+      output
+    };
+    if (fromRef) opts.fromRef = fromRef;
+    const result = await new WorktreeManager(repoRoot).create(opts);
+
+    // Record the base we forked from. If user kept "Current HEAD", capture it now
+    // so the Finish flow can pre-select the right merge target later.
+    let baseToRecord = fromRef;
+    if (!baseToRecord) {
+      try {
+        baseToRecord = (await new GitOps(repoRoot).currentBranch()) ?? undefined;
+      } catch {
+        // ignore
+      }
+    }
+    if (baseToRecord) {
+      await setBase(context, result.path, baseToRecord);
+    }
+
+    await refresh();
     void vscode.window.showInformationMessage(
-      `vsWT: worktree '${result.branch}' created. Right-click it to start a session.`
+      `vsWT: worktree '${result.branch}' created${baseToRecord ? ` from ${baseToRecord}` : ''}.`
     );
   } catch (err) {
     output.appendLine(`[vsWT] ERROR: ${(err as Error).message}`);
@@ -209,40 +282,43 @@ async function createWorktreeCommand(
   }
 }
 
-async function removeWorktreeCommand(
-  node: TreeNode | undefined,
+async function removeWorktreeFlow(
+  worktreePath: string,
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
-  tree: WorktreeTreeProvider,
-  registry: SessionRegistry
+  registry: SessionRegistry,
+  refresh: () => Promise<void>
 ): Promise<void> {
   const repoRoot = await ensureRepo(context);
   if (!repoRoot) return;
 
-  let target: { branch: string; path: string } | null = null;
-  if (node && node.kind === 'worktree') {
-    target = { branch: node.branch, path: node.path };
-  } else {
-    const list = await new WorktreeManager(repoRoot).list();
-    if (list.length === 0) {
-      void vscode.window.showInformationMessage('vsWT: no worktrees to remove.');
-      return;
-    }
-    const pick = await vscode.window.showQuickPick(
-      list.map(w => ({ label: w.branch, description: w.path, w })),
-      { placeHolder: 'Pick a worktree to remove' }
-    );
-    if (!pick) return;
-    target = pick.w;
+  const list = await new WorktreeManager(repoRoot).list();
+  const target = list.find(w => w.path === worktreePath);
+  if (!target) {
+    void vscode.window.showWarningMessage(`vsWT: worktree not found: ${worktreePath}`);
+    return;
   }
 
   const sessionsHere = registry.forWorktree(target.path);
-  const note = sessionsHere.length > 0
+  const sessionNote = sessionsHere.length > 0
     ? ` Will also stop ${sessionsHere.length} active session${sessionsHere.length > 1 ? 's' : ''}.`
     : '';
 
+  let dirtyNote = '';
+  try {
+    const status = await new GitOps(target.path).statusInfo();
+    const lostParts: string[] = [];
+    if (status.modified > 0) lostParts.push(`${status.modified} modified`);
+    if (status.untracked > 0) lostParts.push(`${status.untracked} untracked`);
+    if (lostParts.length > 0) {
+      dirtyNote = ` ⚠ ${lostParts.join(', ')} file${status.modified + status.untracked > 1 ? 's' : ''} will be lost.`;
+    }
+  } catch {
+    // Status unreadable — silently skip the dirty note.
+  }
+
   const confirm = await vscode.window.showWarningMessage(
-    `Remove worktree '${target.branch}' at ${target.path}?${note}`,
+    `Remove worktree '${target.branch}' at ${target.path}?${sessionNote}${dirtyNote}`,
     { modal: true },
     'Remove',
     'Force remove'
@@ -251,7 +327,6 @@ async function removeWorktreeCommand(
 
   for (const s of sessionsHere) registry.stop(s.id);
   if (sessionsHere.length > 0) {
-    // Give Windows a moment to release file handles from disposed terminals.
     await new Promise(resolve => setTimeout(resolve, 500));
   }
 
@@ -260,12 +335,12 @@ async function removeWorktreeCommand(
   const initialForce = confirm === 'Force remove';
   try {
     await manager.remove(target.path, initialForce, output);
-    tree.refresh();
+    await deleteBase(context, target.path);
+    await refresh();
   } catch (err) {
     const msg = (err as Error).message;
     output.appendLine(`[vsWT] ERROR: ${msg}`);
 
-    // Auto-retry with --force for git issues that --force can resolve.
     if (!initialForce && /modified|untracked|submodule|--force|locked/i.test(msg)) {
       const retry = await vscode.window.showWarningMessage(
         `Remove failed: ${msg.split('\n')[0]}\n\nForce remove?`,
@@ -275,7 +350,8 @@ async function removeWorktreeCommand(
       if (retry === 'Force remove') {
         try {
           await manager.remove(target.path, true, output);
-          tree.refresh();
+          await deleteBase(context, target.path);
+          await refresh();
           return;
         } catch (err2) {
           output.appendLine(`[vsWT] ERROR (retry): ${(err2 as Error).message}`);
@@ -288,76 +364,521 @@ async function removeWorktreeCommand(
   }
 }
 
-function openWorktree(node: TreeNode | undefined, newWindow: boolean): void {
-  if (!node || node.kind !== 'worktree') return;
-  void vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(node.path), { forceNewWindow: newWindow });
+async function renameWorktreeFlow(
+  worktreePath: string,
+  newBranchInput: string,
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+  registry: SessionRegistry,
+  refresh: () => Promise<void>
+): Promise<void> {
+  const repoRoot = await ensureRepo(context);
+  if (!repoRoot) return;
+
+  const list = await new WorktreeManager(repoRoot).list();
+  const target = list.find(w => w.path === worktreePath);
+  if (!target) {
+    void vscode.window.showWarningMessage(`vsWT: worktree not found: ${worktreePath}`);
+    return;
+  }
+
+  const newBranch = newBranchInput.trim();
+  if (!newBranch || newBranch === target.branch) return;
+
+  const sessionsHere = registry.forWorktree(target.path);
+  if (sessionsHere.length > 0) {
+    const proceed = await vscode.window.showWarningMessage(
+      `Renaming will close ${sessionsHere.length} active session${sessionsHere.length > 1 ? 's' : ''}. Continue?`,
+      { modal: true },
+      'Continue'
+    );
+    if (!proceed) return;
+    for (const s of sessionsHere) registry.stop(s.id);
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
+  output.show(true);
+  try {
+    const result = await new WorktreeManager(repoRoot).rename(
+      target.path,
+      target.branch,
+      newBranch,
+      output
+    );
+    await moveBase(context, target.path, result.path);
+    await refresh();
+    void vscode.window.showInformationMessage(`vsWT: renamed to '${result.branch}'.`);
+  } catch (err) {
+    output.appendLine(`[vsWT] ERROR: ${(err as Error).message}`);
+    void vscode.window.showErrorMessage(`vsWT: ${(err as Error).message}`);
+  }
 }
 
-function openTerminalInWorktree(node: TreeNode | undefined): void {
-  if (!node || node.kind !== 'worktree') return;
-  const term = vscode.window.createTerminal({
-    name: `${node.branch} · terminal`,
-    cwd: vscode.Uri.file(node.path)
+async function finishWorktreeFlow(
+  worktreePath: string,
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+  registry: SessionRegistry,
+  refresh: () => Promise<void>
+): Promise<void> {
+  const repoRoot = await ensureRepo(context);
+  if (!repoRoot) return;
+
+  const list = await new WorktreeManager(repoRoot).list();
+  const target = list.find(w => w.path === worktreePath);
+  if (!target) {
+    void vscode.window.showWarningMessage(`vsWT: worktree not found: ${worktreePath}`);
+    return;
+  }
+
+  // Pick target branch (where to merge into).
+  const branches = await new GitOps(repoRoot).listBranches(false);
+  const baseItems = branches
+    .filter(b => b.name !== target.branch && !b.isRemote)
+    .map(b => ({ label: b.name, description: b.isCurrent ? '(currently checked out in main repo)' : '' }));
+  if (baseItems.length === 0) {
+    void vscode.window.showErrorMessage('vsWT: no other local branches to merge into.');
+    return;
+  }
+
+  const recordedBase = getBases(context)[target.path];
+
+  // Sort: recorded base first, then main/master/staging/develop, then everything else.
+  baseItems.sort((a, b) => {
+    if (recordedBase) {
+      if (a.label === recordedBase && b.label !== recordedBase) return -1;
+      if (b.label === recordedBase && a.label !== recordedBase) return 1;
+    }
+    const score = (n: string) => (n === 'main' ? 0 : n === 'master' ? 1 : n === 'staging' || n === 'develop' ? 2 : 3);
+    return score(a.label) - score(b.label);
   });
-  term.show();
+
+  // Annotate the recorded base so user knows it's the original fork point.
+  if (recordedBase) {
+    const idx = baseItems.findIndex(i => i.label === recordedBase);
+    if (idx >= 0 && baseItems[idx]) {
+      const item = baseItems[idx];
+      const desc = item.description ? `${item.description} · forked from` : 'forked from';
+      baseItems[idx] = { label: item.label, description: desc };
+    }
+  }
+
+  const baseChoice = await vscode.window.showQuickPick(baseItems, {
+    placeHolder: `Merge '${target.branch}' into…${recordedBase ? ` (forked from ${recordedBase})` : ''}`
+  });
+  if (!baseChoice) return;
+  const targetBranch = baseChoice.label;
+
+  const mode = await vscode.window.showWarningMessage(
+    `Finish worktree '${target.branch}' → '${targetBranch}'?\n\nWill push, switch main repo, merge, push, and remove the worktree.`,
+    { modal: true },
+    'Merge (no-ff)',
+    'Squash merge'
+  );
+  if (!mode) return;
+  const squash = mode === 'Squash merge';
+
+  // Pre-flight: main repo must be clean to switch branch.
+  const mainGit = new GitOps(repoRoot);
+  try {
+    const mainStatus = await mainGit.statusInfo();
+    if (mainStatus.modified > 0 || mainStatus.untracked > 0) {
+      void vscode.window.showErrorMessage(
+        `vsWT: main repo at ${repoRoot} has uncommitted changes. Commit or stash before finishing.`
+      );
+      return;
+    }
+  } catch {
+    // status failed — proceed cautiously
+  }
+
+  output.show(true);
+  output.appendLine(`[vsWT] finishing '${target.branch}' → '${targetBranch}' (${squash ? 'squash' : 'no-ff'})`);
+
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `vsWT: finish ${target.branch}`,
+      cancellable: false
+    },
+    async progress => {
+      const featureGit = new GitOps(target.path);
+      try {
+        progress.report({ message: 'pushing feature…' });
+        if (!(await featureGit.refExists(`refs/remotes/origin/${target.branch}`))) {
+          output.appendLine(`[vsWT] pushing ${target.branch}`);
+          await featureGit.push();
+        }
+
+        const originalBranch = await mainGit.currentBranch();
+
+        progress.report({ message: `checkout ${targetBranch}…` });
+        output.appendLine(`[vsWT] checkout ${targetBranch} (was ${originalBranch ?? '?'})`);
+        await mainGit.checkout(targetBranch);
+
+        progress.report({ message: `pulling ${targetBranch}…` });
+        try {
+          output.appendLine(`[vsWT] pull ${targetBranch}`);
+          await mainGit.pull();
+        } catch (err) {
+          output.appendLine(`[vsWT] pull warning (continuing): ${(err as Error).message.split('\n')[0]}`);
+        }
+
+        progress.report({ message: `merging ${target.branch}…` });
+        output.appendLine(`[vsWT] merge ${target.branch} ${squash ? '(squash)' : '(--no-ff)'}`);
+        try {
+          if (squash) {
+            await mainGit.mergeSquash(target.branch, `Squash merge of ${target.branch}`);
+          } else {
+            await mainGit.merge(target.branch, true);
+          }
+          output.appendLine(`[vsWT] ✓ merged`);
+        } catch (err) {
+          throw new Error(
+            `Merge failed (likely conflict). Main repo is on '${targetBranch}'. Resolve manually, then commit.\n${(err as Error).message.split('\n')[0]}`
+          );
+        }
+
+        progress.report({ message: `pushing ${targetBranch}…` });
+        try {
+          output.appendLine(`[vsWT] push ${targetBranch}`);
+          await mainGit.push();
+        } catch (err) {
+          output.appendLine(`[vsWT] push failed (non-fatal): ${(err as Error).message.split('\n')[0]}`);
+        }
+
+        const sessionsHere = registry.forWorktree(target.path);
+        for (const s of sessionsHere) registry.stop(s.id);
+        if (sessionsHere.length > 0) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        progress.report({ message: 'removing worktree…' });
+        await new WorktreeManager(repoRoot).remove(target.path, true, output);
+        await deleteBase(context, target.path);
+
+        try {
+          await mainGit.deleteBranch(target.branch);
+          output.appendLine(`[vsWT] ✓ deleted local branch ${target.branch}`);
+        } catch {
+          // Squash merge leaves branch unmerged from git's POV; user can delete via -D later.
+          output.appendLine(`[vsWT] note: local branch ${target.branch} kept (use -D to force-delete)`);
+        }
+
+        output.appendLine(`[vsWT] ✓ finish complete`);
+        await refresh();
+        void vscode.window.showInformationMessage(
+          `vsWT: '${target.branch}' merged into '${targetBranch}' and cleaned up.${
+            originalBranch && originalBranch !== targetBranch ? ` Main repo is now on '${targetBranch}'.` : ''
+          }`
+        );
+      } catch (err) {
+        const msg = (err as Error).message;
+        output.appendLine(`[vsWT] ERROR: ${msg}`);
+        void vscode.window.showErrorMessage(`vsWT: finish failed — ${msg.split('\n')[0]}`);
+        await refresh();
+      }
+    }
+  );
 }
 
-async function startSession(
-  arg: TreeNode | undefined,
+async function showFileDiffFlow(
+  worktreePath: string,
+  relativePath: string,
+  statusCode: string
+): Promise<void> {
+  const filePath = path.join(worktreePath, relativePath);
+  const fileUri = vscode.Uri.file(filePath);
+
+  if (statusCode.trim().startsWith('?')) {
+    // Untracked file — no HEAD version, just open it.
+    await vscode.window.showTextDocument(fileUri, { preview: true });
+    return;
+  }
+
+  // Use the `git:` URI scheme served by VS Code's built-in git extension.
+  const headUri = fileUri.with({
+    scheme: 'git',
+    query: JSON.stringify({ path: filePath, ref: 'HEAD' })
+  });
+
+  await vscode.commands.executeCommand(
+    'vscode.diff',
+    headUri,
+    fileUri,
+    `${relativePath} (HEAD ↔ Working)`,
+    { preview: true }
+  );
+}
+
+async function createPRFlow(
+  worktreePath: string,
+  output: vscode.OutputChannel,
+  refresh: () => Promise<void>
+): Promise<void> {
+  const git = new GitOps(worktreePath);
+  const branch = await git.currentBranch();
+  if (!branch) {
+    void vscode.window.showErrorMessage('vsWT: cannot create PR from detached HEAD');
+    return;
+  }
+
+  output.show(true);
+  output.appendLine(`[vsWT] preparing PR for ${branch}`);
+
+  if (!(await git.refExists(`refs/remotes/origin/${branch}`))) {
+    output.appendLine(`[vsWT] branch not on origin, pushing first...`);
+    try {
+      await git.push();
+      output.appendLine(`[vsWT] ✓ pushed`);
+    } catch (err) {
+      const msg = (err as Error).message;
+      output.appendLine(`[vsWT] push failed: ${msg}`);
+      void vscode.window.showErrorMessage(`vsWT: push failed — ${msg.split('\n')[0]}`);
+      return;
+    }
+  }
+
+  output.appendLine(`[vsWT] running 'gh pr create --web'`);
+  try {
+    const { stdout, stderr } = await execFileAsync('gh', ['pr', 'create', '--web'], {
+      cwd: worktreePath,
+      maxBuffer: 1024 * 1024
+    });
+    if (stdout) output.append(stdout);
+    if (stderr) output.append(stderr);
+    output.appendLine(`[vsWT] ✓ PR creation page opened in browser`);
+  } catch (err) {
+    const e = err as { code?: string; stderr?: string; message?: string };
+    if (e.code === 'ENOENT') {
+      void vscode.window.showErrorMessage(
+        'vsWT: `gh` CLI not installed. Install from https://cli.github.com/'
+      );
+    } else {
+      const msg = e.stderr ?? e.message ?? 'unknown error';
+      output.appendLine(`[vsWT] gh failed: ${msg}`);
+      void vscode.window.showErrorMessage(`vsWT: gh failed — ${msg.split('\n')[0] ?? 'unknown'}`);
+    }
+  } finally {
+    await refresh();
+  }
+}
+
+async function syncWorktreeFlow(
+  worktreePath: string,
+  op: 'push' | 'pull' | 'fetch',
+  output: vscode.OutputChannel,
+  refresh: () => Promise<void>
+): Promise<void> {
+  const git = new GitOps(worktreePath);
+  let failureMessage: string | null = null;
+
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `vsWT: ${op} ${path.basename(worktreePath)}`,
+      cancellable: false
+    },
+    async () => {
+      output.show(true);
+      output.appendLine(`[vsWT] ${op} in ${worktreePath}`);
+      try {
+        const stdout =
+          op === 'push' ? await git.push() :
+          op === 'pull' ? await git.pull() :
+          await git.fetch();
+        if (stdout.trim()) output.append(stdout);
+        output.appendLine(`[vsWT] ✓ ${op} done`);
+      } catch (err) {
+        failureMessage = (err as Error).message;
+        output.appendLine(`[vsWT] ERROR: ${failureMessage}`);
+      }
+    }
+  );
+
+  await refresh();
+
+  if (!failureMessage) return;
+
+  // Quality-of-life: pull failed because branch has no upstream → offer to push first.
+  if (op === 'pull' && /no upstream/i.test(failureMessage)) {
+    const action = await vscode.window.showWarningMessage(
+      (failureMessage as string).split('\n')[0] ?? 'No upstream branch',
+      'Push first then Pull',
+      'Cancel'
+    );
+    if (action === 'Push first then Pull') {
+      await syncWorktreeFlow(worktreePath, 'push', output, refresh);
+      await syncWorktreeFlow(worktreePath, 'pull', output, refresh);
+    }
+    return;
+  }
+
+  void vscode.window.showErrorMessage(
+    `vsWT: ${op} failed — ${(failureMessage as string).split('\n')[0]}`
+  );
+}
+
+async function startSessionByPath(
+  worktreePath: string,
+  agentType: AgentType,
+  shellName: string | undefined,
+  context: vscode.ExtensionContext,
+  registry: SessionRegistry,
+  refresh: () => Promise<void>
+): Promise<void> {
+  const repoRoot = await ensureRepo(context);
+  if (!repoRoot) return;
+  const list = await new WorktreeManager(repoRoot).list();
+  const target = list.find(w => w.path === worktreePath);
+  if (!target) {
+    void vscode.window.showWarningMessage(`vsWT: worktree not found: ${worktreePath}`);
+    return;
+  }
+  let shellOverride: { name: string; command: string; args?: string[] } | undefined;
+  if (agentType === 'shell' && shellName) {
+    const found = getSettings().extraShells.find(s => s.name === shellName);
+    if (found) {
+      shellOverride = { name: found.name, command: found.command };
+      if (found.args && found.args.length > 0) shellOverride.args = found.args;
+    }
+  }
+  registry.start({ branch: target.branch, path: target.path }, agentType, shellOverride);
+  await refresh();
+}
+
+async function startSessionInteractive(
   agentType: AgentType,
   context: vscode.ExtensionContext,
   registry: SessionRegistry,
-  output: vscode.OutputChannel
+  refresh: () => Promise<void>
 ): Promise<void> {
-  let target: { branch: string; path: string } | null = null;
-  if (arg && arg.kind === 'worktree') {
-    target = { branch: arg.branch, path: arg.path };
-  } else {
-    const repoRoot = await ensureRepo(context);
-    if (!repoRoot) return;
-    const list = await new WorktreeManager(repoRoot).list();
-    if (list.length === 0) {
-      void vscode.window.showInformationMessage('vsWT: create a worktree first.');
-      return;
-    }
-    const pick = await vscode.window.showQuickPick(
-      list.map(w => ({ label: w.branch, description: w.path, w })),
-      { placeHolder: `Pick worktree to start ${agentType} session in` }
-    );
-    if (!pick) return;
-    target = pick.w;
+  const repoRoot = await ensureRepo(context);
+  if (!repoRoot) return;
+  const list = await new WorktreeManager(repoRoot).list();
+  if (list.length === 0) {
+    void vscode.window.showInformationMessage('vsWT: create a worktree first.');
+    return;
   }
-  output.appendLine(`[vsWT] starting ${agentType} session in ${target.path}`);
-  try {
-    registry.start(target, agentType);
-    output.appendLine(`[vsWT] ✓ session created`);
-  } catch (err) {
-    const msg = (err as Error).message;
-    output.appendLine(`[vsWT] ERROR: ${msg}`);
-    output.appendLine(`[vsWT] stack: ${(err as Error).stack ?? '(no stack)'}`);
-    output.show(true);
-    void vscode.window.showErrorMessage(`vsWT: failed to start ${agentType}: ${msg}`);
-  }
-}
-
-function showSession(arg: TreeNode | undefined, registry: SessionRegistry): void {
-  if (!arg || arg.kind !== 'session') return;
-  registry.show(arg.session.id);
-}
-
-function stopSession(arg: TreeNode | undefined, registry: SessionRegistry): void {
-  if (!arg || arg.kind !== 'session') return;
-  registry.stop(arg.session.id);
+  const pick = await vscode.window.showQuickPick(
+    list.map(w => ({ label: w.branch, description: w.path, w })),
+    { placeHolder: `Pick worktree to start ${agentType} session in` }
+  );
+  if (!pick) return;
+  registry.start(pick.w, agentType);
+  await refresh();
 }
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('vsWT');
   const registry = new SessionRegistry();
-  const tree = new WorktreeTreeProvider(context, registry);
-  const view = vscode.window.createTreeView('vswt.sidebar', {
-    treeDataProvider: tree,
-    showCollapseAll: false
-  });
+
+  let host: SidebarHost; // assigned below
+
+  const refreshState = async (): Promise<void> => {
+    if (host) await host.pushState();
+  };
+
+  const handleRequest = async (req: RpcRequest): Promise<unknown> => {
+    switch (req.type) {
+      case 'ready':
+        await refreshState();
+        return undefined;
+
+      case 'pickRepo':
+        await pickRepo(context);
+        await refreshState();
+        return undefined;
+
+      case 'createWorktree':
+        await createWorktreeFlow(context, output, refreshState);
+        return undefined;
+
+      case 'removeWorktree':
+        await removeWorktreeFlow(req.path, context, output, registry, refreshState);
+        return undefined;
+
+      case 'renameWorktree':
+        await renameWorktreeFlow(req.path, req.newBranch, context, output, registry, refreshState);
+        return undefined;
+
+      case 'pushWorktree':
+        await syncWorktreeFlow(req.path, 'push', output, refreshState);
+        return undefined;
+
+      case 'pullWorktree':
+        await syncWorktreeFlow(req.path, 'pull', output, refreshState);
+        return undefined;
+
+      case 'fetchWorktree':
+        await syncWorktreeFlow(req.path, 'fetch', output, refreshState);
+        return undefined;
+
+      case 'showFileDiff':
+        await showFileDiffFlow(req.worktreePath, req.relativePath, req.statusCode);
+        return undefined;
+
+      case 'createPR':
+        await createPRFlow(req.path, output, refreshState);
+        return undefined;
+
+      case 'finishWorktree':
+        await finishWorktreeFlow(req.path, context, output, registry, refreshState);
+        return undefined;
+
+      case 'togglePin': {
+        const pinned = getPinnedPaths(context);
+        await setPinned(context, req.path, !pinned.has(req.path));
+        await refreshState();
+        return undefined;
+      }
+
+      case 'startSession':
+        await startSessionByPath(req.worktreePath, req.agentType, req.shellName, context, registry, refreshState);
+        return undefined;
+
+      case 'stopSession':
+        registry.stop(req.sessionId);
+        return undefined;
+
+      case 'showSession':
+        registry.show(req.sessionId);
+        return undefined;
+
+      case 'resumeSession':
+        registry.resume(req.sessionId);
+        return undefined;
+
+      case 'openWorktree':
+        await vscode.commands.executeCommand(
+          'vscode.openFolder',
+          vscode.Uri.file(req.path),
+          { forceNewWindow: req.newWindow }
+        );
+        return undefined;
+
+      case 'openTerminal': {
+        const term = vscode.window.createTerminal({
+          name: `${path.basename(req.path)} · terminal`,
+          cwd: vscode.Uri.file(req.path)
+        });
+        term.show();
+        return undefined;
+      }
+
+      default:
+        throw new Error(`Unknown request: ${(req as { type: string }).type}`);
+    }
+  };
+
+  host = new SidebarHost(
+    context.extensionUri,
+    handleRequest,
+    () => buildState(context, registry)
+  );
+
+  // Probe for installed shells in the background; refresh sidebar once done.
+  void initSettings().then(() => void refreshState());
 
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBar.command = 'vswt.openSidebar';
@@ -366,12 +887,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const refreshIndicators = (): void => {
     const count = registry.count();
     if (count === 0) {
-      view.badge = undefined;
+      host.setBadge(0);
       statusBar.hide();
       return;
     }
+    host.setBadge(count);
     const word = count === 1 ? 'session' : 'sessions';
-    view.badge = { value: count, tooltip: `${count} active ${word}` };
     statusBar.text = `$(sparkle) ${count} ${word}`;
     statusBar.tooltip = `vsWT: ${count} active ${word}`;
     statusBar.show();
@@ -379,37 +900,34 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     output,
-    view,
     statusBar,
-    registry.init(),
-    registry.onChange(refreshIndicators),
-    vscode.workspace.onDidChangeWorkspaceFolders(() => tree.refresh()),
+    registry.init(context),
+    registry.onChange(() => {
+      refreshIndicators();
+      void refreshState();
+    }),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => void refreshState()),
+    vscode.window.registerWebviewViewProvider(SidebarHost.viewType, host),
     vscode.commands.registerCommand('vswt.openSidebar', () => {
       void vscode.commands.executeCommand('workbench.view.extension.vswt');
     }),
-    vscode.commands.registerCommand('vswt.refreshWorktrees', () => tree.refresh()),
+    vscode.commands.registerCommand('vswt.refreshWorktrees', () => void refreshState()),
     vscode.commands.registerCommand('vswt.pickRepo', async () => {
       await pickRepo(context);
-      tree.refresh();
+      await refreshState();
     }),
-    vscode.commands.registerCommand('vswt.createWorktree', () => createWorktreeCommand(context, output, tree)),
-    vscode.commands.registerCommand('vswt.removeWorktree', (node?: TreeNode) =>
-      removeWorktreeCommand(node, context, output, tree, registry)
+    vscode.commands.registerCommand('vswt.createWorktree', () =>
+      createWorktreeFlow(context, output, refreshState)
     ),
-    vscode.commands.registerCommand('vswt.openWorktree', (node?: TreeNode) => openWorktree(node, true)),
-    vscode.commands.registerCommand('vswt.openWorktreeCurrentWindow', (node?: TreeNode) => openWorktree(node, false)),
-    vscode.commands.registerCommand('vswt.openTerminalInWorktree', (node?: TreeNode) => openTerminalInWorktree(node)),
-    vscode.commands.registerCommand('vswt.startClaudeSession', (node?: TreeNode) =>
-      startSession(node, 'claude', context, registry, output)
+    vscode.commands.registerCommand('vswt.startClaudeSession', () =>
+      startSessionInteractive('claude', context, registry, refreshState)
     ),
-    vscode.commands.registerCommand('vswt.startShellSession', (node?: TreeNode) =>
-      startSession(node, 'shell', context, registry, output)
-    ),
-    vscode.commands.registerCommand('vswt.showSession', (node?: TreeNode) => showSession(node, registry)),
-    vscode.commands.registerCommand('vswt.stopSession', (node?: TreeNode) => stopSession(node, registry))
+    vscode.commands.registerCommand('vswt.startShellSession', () =>
+      startSessionInteractive('shell', context, registry, refreshState)
+    )
   );
 }
 
 export function deactivate(): void {
-  // nothing to clean up — disposables handled by context.subscriptions
+  // disposables handled by context.subscriptions
 }

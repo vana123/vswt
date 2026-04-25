@@ -17,10 +17,26 @@ const extensionConfig = {
   logLevel: 'info'
 };
 
+/** @type {import('esbuild').BuildOptions} */
+const webviewConfig = {
+  entryPoints: ['webview-ui/index.tsx'],
+  bundle: true,
+  outfile: 'dist/webview.js',
+  platform: 'browser',
+  format: 'iife',
+  target: 'es2022',
+  jsx: 'automatic',
+  jsxImportSource: 'preact',
+  sourcemap: dev,
+  minify: !dev,
+  logLevel: 'info'
+};
+
 if (watch) {
-  const ctx = await context(extensionConfig);
-  await ctx.watch();
-  console.log('[esbuild] watching extension...');
+  const ctxA = await context(extensionConfig);
+  const ctxB = await context(webviewConfig);
+  await Promise.all([ctxA.watch(), ctxB.watch()]);
+  console.log('[esbuild] watching extension + webview...');
 } else {
-  await build(extensionConfig);
+  await Promise.all([build(extensionConfig), build(webviewConfig)]);
 }
