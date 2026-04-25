@@ -1,0 +1,283 @@
+{
+  "name": "vswt",
+  "displayName": "vsWT — Worktree Orchestrator",
+  "description": "Run parallel Claude Code sessions, each in its own git worktree, from the VS Code sidebar.",
+  "version": "0.0.1",
+  "publisher": "vana-savych",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other",
+    "AI",
+    "SCM Providers"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "agents",
+    "git worktree",
+    "parallel"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vana123/vswt.git"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onView:vswt.sidebar"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vswt",
+          "title": "vsWT",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "vswt": [
+        {
+          "type": "tree",
+          "id": "vswt.sidebar",
+          "name": "Worktrees",
+          "icon": "media/icon.svg",
+          "contextualTitle": "vsWT"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "vswt.openSidebar",
+        "title": "Open Sidebar",
+        "category": "vsWT"
+      },
+      {
+        "command": "vswt.createWorktree",
+        "title": "New Worktree…",
+        "category": "vsWT",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vswt.refreshWorktrees",
+        "title": "Refresh",
+        "category": "vsWT",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vswt.pickRepo",
+        "title": "Pick Repository…",
+        "category": "vsWT",
+        "icon": "$(repo)"
+      },
+      {
+        "command": "vswt.removeWorktree",
+        "title": "Remove Worktree…",
+        "category": "vsWT"
+      },
+      {
+        "command": "vswt.openWorktree",
+        "title": "Open in New Window",
+        "category": "vsWT"
+      },
+      {
+        "command": "vswt.openWorktreeCurrentWindow",
+        "title": "Open in Current Window",
+        "category": "vsWT"
+      },
+      {
+        "command": "vswt.openTerminalInWorktree",
+        "title": "Open Plain Terminal",
+        "category": "vsWT"
+      },
+      {
+        "command": "vswt.startClaudeSession",
+        "title": "Start Claude Session",
+        "category": "vsWT",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "vswt.startShellSession",
+        "title": "Start Shell Session",
+        "category": "vsWT",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "vswt.showSession",
+        "title": "Show Session Terminal",
+        "category": "vsWT"
+      },
+      {
+        "command": "vswt.stopSession",
+        "title": "Stop Session",
+        "category": "vsWT",
+        "icon": "$(stop-circle)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "vswt.createWorktree",
+          "when": "view == vswt.sidebar",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vswt.refreshWorktrees",
+          "when": "view == vswt.sidebar",
+          "group": "navigation@2"
+        },
+        {
+          "command": "vswt.pickRepo",
+          "when": "view == vswt.sidebar",
+          "group": "1_config@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "vswt.startClaudeSession",
+          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
+          "group": "inline@1"
+        },
+        {
+          "command": "vswt.startShellSession",
+          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
+          "group": "inline@2"
+        },
+        {
+          "command": "vswt.startClaudeSession",
+          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
+          "group": "1_session@1"
+        },
+        {
+          "command": "vswt.startShellSession",
+          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
+          "group": "1_session@2"
+        },
+        {
+          "command": "vswt.openTerminalInWorktree",
+          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
+          "group": "1_session@3"
+        },
+        {
+          "command": "vswt.openWorktreeCurrentWindow",
+          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
+          "group": "2_open@1"
+        },
+        {
+          "command": "vswt.openWorktree",
+          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
+          "group": "2_open@2"
+        },
+        {
+          "command": "vswt.removeWorktree",
+          "when": "view == vswt.sidebar && viewItem == vswt.worktree",
+          "group": "9_remove@1"
+        },
+        {
+          "command": "vswt.stopSession",
+          "when": "view == vswt.sidebar && viewItem == vswt.session",
+          "group": "inline@1"
+        },
+        {
+          "command": "vswt.showSession",
+          "when": "view == vswt.sidebar && viewItem == vswt.session",
+          "group": "1_session@1"
+        },
+        {
+          "command": "vswt.stopSession",
+          "when": "view == vswt.sidebar && viewItem == vswt.session",
+          "group": "9_remove@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "vswt.openWorktree",
+          "when": "false"
+        },
+        {
+          "command": "vswt.openWorktreeCurrentWindow",
+          "when": "false"
+        },
+        {
+          "command": "vswt.openTerminalInWorktree",
+          "when": "false"
+        },
+        {
+          "command": "vswt.showSession",
+          "when": "false"
+        },
+        {
+          "command": "vswt.stopSession",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "vsWT",
+      "properties": {
+        "vswt.worktree.parentDir": {
+          "type": "string",
+          "default": "",
+          "description": "Parent directory for new worktrees. Empty = sibling folder `../{repo}-worktrees`. Supports `~` expansion."
+        },
+        "vswt.worktree.copyFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            ".env",
+            ".env.*",
+            ".claude/**"
+          ],
+          "description": "Glob patterns (relative to repo root) copied into a new worktree when the user opts in."
+        },
+        "vswt.worktree.postCreateCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Shell command run inside the new worktree after creation (e.g. `npm install` or `pnpm i`). Empty to skip."
+        },
+        "vswt.worktree.runPrismaGenerate": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run `npx prisma generate` if `prisma/schema.prisma` exists in the new worktree."
+        },
+        "vswt.shell.windows": {
+          "type": "string",
+          "default": "",
+          "description": "Windows shell override for Shell sessions (`pwsh.exe`, `powershell.exe`, `cmd.exe`). Empty = auto."
+        },
+        "vswt.notifications.sound": {
+          "type": "boolean",
+          "default": true,
+          "description": "Play OS sound on session state transitions (waiting input, approval needed, done)."
+        },
+        "vswt.claude.path": {
+          "type": "string",
+          "default": "claude",
+          "description": "Path or command name for the Claude Code CLI."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.0",
+    "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0"
+  }
+}
