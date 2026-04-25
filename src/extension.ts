@@ -7,6 +7,7 @@ import { WorktreeManager } from './git/WorktreeManager';
 import { SessionRegistry, AgentType } from './SessionRegistry';
 import { SidebarHost } from './webview/SidebarHost';
 import { getSettings, initSettings } from './Settings';
+import { readClipboardImage, formatImageReference } from './clipboard';
 import type { AppState, RpcRequest, WorktreeDTO, SessionDTO, ExtraShellDTO } from './webview/protocol';
 
 const execFileAsync = promisify(execFile);
@@ -880,6 +881,41 @@ export function activate(context: vscode.ExtensionContext): void {
   // Probe for installed shells in the background; refresh sidebar once done.
   void initSettings().then(() => void refreshState());
 
+  // Track when the active terminal belongs to vsWT so the Ctrl+V keybinding
+  // only fires inside our sessions.
+  const updateTerminalContext = (term: vscode.Terminal | undefined): void => {
+    const isOurs = term !== undefined && registry.getSessionForTerminal(term) !== null;
+    void vscode.commands.executeCommand('setContext', 'vswt.terminalActive', isOurs);
+  };
+  updateTerminalContext(vscode.window.activeTerminal);
+
+  const pasteImageHandler = async (): Promise<void> => {
+    const term = vscode.window.activeTerminal;
+    if (!term) return;
+
+    // Fast path: if there's any text on the clipboard, use the standard paste.
+    const text = await vscode.env.clipboard.readText();
+    if (text.length > 0) {
+      await vscode.commands.executeCommand('workbench.action.terminal.paste');
+      return;
+    }
+
+    // No text — try to extract an image (Windows only for now).
+    try {
+      const imgPath = await readClipboardImage();
+      if (imgPath) {
+        term.sendText(formatImageReference(imgPath), false);
+        output.appendLine(`[vsWT] image pasted: ${imgPath}`);
+      } else {
+        // Nothing on the clipboard, or unsupported platform.
+        await vscode.commands.executeCommand('workbench.action.terminal.paste');
+      }
+    } catch (err) {
+      output.appendLine(`[vsWT] paste image failed: ${(err as Error).message}`);
+      await vscode.commands.executeCommand('workbench.action.terminal.paste');
+    }
+  };
+
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBar.command = 'vswt.openSidebar';
   statusBar.name = 'vsWT';
@@ -924,7 +960,10 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand('vswt.startShellSession', () =>
       startSessionInteractive('shell', context, registry, refreshState)
-    )
+    ),
+    vscode.commands.registerCommand('vswt.pasteImage', pasteImageHandler),
+    vscode.window.onDidChangeActiveTerminal(updateTerminalContext),
+    registry.onChange(() => updateTerminalContext(vscode.window.activeTerminal))
   );
 }
 

@@ -180,6 +180,14 @@ export class SessionRegistry {
     entry.terminal.dispose();
   }
 
+  /** Look up the session info for a terminal we own (or null if we don't own it). */
+  getSessionForTerminal(terminal: vscode.Terminal): SessionInfo | null {
+    for (const entry of this.sessions.values()) {
+      if (entry.terminal === terminal) return entry.info;
+    }
+    return null;
+  }
+
   forWorktree(worktreePath: string): SessionInfo[] {
     const out: SessionInfo[] = [];
     for (const { info } of this.sessions.values()) {

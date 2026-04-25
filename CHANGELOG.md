@@ -4,6 +4,16 @@ All notable changes to vsWT will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.0.2] — 2026-04-26
+
+### Added
+- **Image paste in Claude sessions on Windows**. `Ctrl+V` inside a vsWT
+  terminal now detects images on the clipboard, saves them as PNG to the
+  system temp directory, and inserts `@<path>` so Claude Code can read the
+  attachment. Text paste keeps its default fast path; the image branch only
+  kicks in when the clipboard has no text. Linux and macOS already handle
+  image paste natively and are unchanged.
+
 ## [0.0.1] — 2026-04-26
 
 Initial pre-alpha release.

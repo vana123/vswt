@@ -2,7 +2,7 @@
   "name": "vswt",
   "displayName": "vsWT — Worktree Orchestrator",
   "description": "Run parallel Claude Code sessions, each in its own git worktree, from the VS Code sidebar.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "vana123",
   "license": "MIT",
   "engines": {
@@ -92,6 +92,18 @@
         "command": "vswt.startShellSession",
         "title": "Start Shell Session",
         "category": "vsWT"
+      },
+      {
+        "command": "vswt.pasteImage",
+        "title": "Paste Image to Active Session",
+        "category": "vsWT"
+      }
+    ],
+    "keybindings": [
+      {
+        "key": "ctrl+v",
+        "command": "vswt.pasteImage",
+        "when": "terminalFocus && vswt.terminalActive && isWindows"
       }
     ],
     "menus": {
