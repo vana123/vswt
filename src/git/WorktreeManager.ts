@@ -11,8 +11,10 @@ const execFileAsync = promisify(execFile);
 export interface CreateWorktreeOptions {
   branch: string;
   fromRef?: string;
-  /** Opt-in per session: copy `vswt.worktree.copyFiles` patterns from the main repo. */
-  copyEnv: boolean;
+  /** Absolute paths under the main repo to copy into the new worktree. Empty = none. */
+  copyPaths: string[];
+  /** Run `git submodule update --init --recursive` after creation. */
+  initSubmodules: boolean;
   output: vscode.OutputChannel;
 }
 
@@ -35,14 +37,19 @@ export class WorktreeManager {
     if (opts.fromRef) addOpts.fromRef = opts.fromRef;
     await git.addWorktree(addOpts);
 
-    if (opts.copyEnv) {
-      output.appendLine(`[vsWT] copying configured files from main repo (opt-in)...`);
-      await this.copyConfiguredFiles(settings.worktreeCopyFiles, targetPath, output);
+    if (opts.copyPaths.length > 0) {
+      output.appendLine(`[vsWT] copying ${opts.copyPaths.length} item(s) from main repo...`);
+      await this.copyPaths(opts.copyPaths, targetPath, output);
     }
 
-    if (await this.hasSubmodules()) {
+    if (opts.initSubmodules && (await this.hasSubmodules())) {
       output.appendLine(`[vsWT] initializing submodules...`);
-      await git.initSubmodulesIn(targetPath);
+      try {
+        await git.initSubmodulesIn(targetPath, line => output.appendLine(`[git] ${line}`));
+        output.appendLine(`[vsWT] ✓ submodules initialized`);
+      } catch (err) {
+        output.appendLine(`[vsWT] submodule init failed (non-fatal): ${(err as Error).message.split('\n')[0]}`);
+      }
     }
 
     if (settings.worktreePostCreateCommand.trim()) {
@@ -65,6 +72,9 @@ export class WorktreeManager {
 
   async remove(worktreePath: string, force: boolean, output: vscode.OutputChannel): Promise<void> {
     output.appendLine(`[vsWT] removing worktree ${worktreePath} (force=${force})`);
+    if (await this.fileExists(path.join(worktreePath, '.gitmodules'))) {
+      output.appendLine(`[vsWT] worktree contains submodules; .git files inside submodule dirs may need fs.rm fallback`);
+    }
     const git = new GitOps(this.repoRoot);
     let gitErr: Error | null = null;
 
@@ -176,6 +186,12 @@ export class WorktreeManager {
     return { branch: newBranch, path: newPath };
   }
 
+  async addFiles(targetPath: string, srcPaths: string[], output: vscode.OutputChannel): Promise<void> {
+    if (srcPaths.length === 0) return;
+    output.appendLine(`[vsWT] copying ${srcPaths.length} item(s) into ${targetPath}...`);
+    await this.copyPaths(srcPaths, targetPath, output);
+  }
+
   async list(): Promise<WorktreeRecord[]> {
     const all = await new GitOps(this.repoRoot).listWorktrees();
     return all
@@ -213,50 +229,22 @@ export class WorktreeManager {
     return this.fileExists(path.join(this.repoRoot, '.gitmodules'));
   }
 
-  private async copyConfiguredFiles(patterns: string[], targetPath: string, output: vscode.OutputChannel): Promise<void> {
-    for (const pattern of patterns) {
-      const matches = await this.resolveCopyTargets(pattern);
-      if (matches.length === 0) {
-        output.appendLine(`[vsWT]   · no match for ${pattern}`);
+  private async copyPaths(srcPaths: string[], targetPath: string, output: vscode.OutputChannel): Promise<void> {
+    for (const src of srcPaths) {
+      const rel = path.relative(this.repoRoot, src);
+      const dest = path.join(targetPath, rel);
+      if (await this.fileExists(dest)) {
+        output.appendLine(`[vsWT]   ! skipped (exists): ${rel}`);
         continue;
       }
-      for (const src of matches) {
-        const rel = path.relative(this.repoRoot, src);
-        const dest = path.join(targetPath, rel);
-        try {
-          await fs.mkdir(path.dirname(dest), { recursive: true });
-          await fs.cp(src, dest, { recursive: true, force: false, errorOnExist: false });
-          output.appendLine(`[vsWT]   + ${rel}`);
-        } catch (err) {
-          output.appendLine(`[vsWT]   ! failed to copy ${rel}: ${(err as Error).message}`);
-        }
-      }
-    }
-  }
-
-  /** Minimal pattern resolver: exact path, single-`*` filename glob, or recursive `dir/**`. */
-  private async resolveCopyTargets(pattern: string): Promise<string[]> {
-    // Recursive: `dir/**` or `dir/**/*`
-    const recursive = pattern.match(/^([^*]+)\/\*\*(?:\/\*)?$/);
-    if (recursive && recursive[1]) {
-      const full = path.join(this.repoRoot, recursive[1]);
-      return (await this.fileExists(full)) ? [full] : [];
-    }
-    // Filename glob: `*.env`, `.env.*` (single `*`, no slashes after)
-    if (pattern.includes('*')) {
-      const dir = path.join(this.repoRoot, path.dirname(pattern));
-      const filename = path.basename(pattern);
-      const re = new RegExp('^' + filename.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$');
       try {
-        const entries = await fs.readdir(dir);
-        return entries.filter(e => re.test(e)).map(e => path.join(dir, e));
-      } catch {
-        return [];
+        await fs.mkdir(path.dirname(dest), { recursive: true });
+        await fs.cp(src, dest, { recursive: true, force: false, errorOnExist: false });
+        output.appendLine(`[vsWT]   + ${rel}`);
+      } catch (err) {
+        output.appendLine(`[vsWT]   ! failed to copy ${rel}: ${(err as Error).message}`);
       }
     }
-    // Exact path
-    const full = path.join(this.repoRoot, pattern);
-    return (await this.fileExists(full)) ? [full] : [];
   }
 
   private async runShellCommand(cmd: string, cwd: string, output: vscode.OutputChannel): Promise<void> {

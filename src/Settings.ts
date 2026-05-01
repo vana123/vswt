@@ -108,7 +108,7 @@ export function getSettings(): VswtConfig {
 
   return {
     worktreeParentDir: cfg.get<string>('worktree.parentDir') ?? '',
-    worktreeCopyFiles: cfg.get<string[]>('worktree.copyFiles') ?? ['.env', '.env.*', '.claude/**'],
+    worktreeCopyFiles: cfg.get<string[]>('worktree.copyFiles') ?? ['.env', '.env.*', '.claude/CLAUDE.md', '.claude/agents/**', '.claude/commands/**'],
     worktreePostCreateCommand: cfg.get<string>('worktree.postCreateCommand') ?? '',
     worktreeRunPrismaGenerate: cfg.get<boolean>('worktree.runPrismaGenerate') ?? true,
     shellWindows: cfg.get<string>('shell.windows') ?? '',

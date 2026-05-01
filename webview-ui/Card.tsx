@@ -16,7 +16,8 @@ import {
   PRIcon,
   CheckIcon,
   PlayIcon,
-  BranchIcon
+  BranchIcon,
+  FilePlusIcon
 } from './icons';
 
 function StatusBadge({ status }: { status: WorktreeStatusDTO | undefined }) {
@@ -87,7 +88,7 @@ function SessionRow({ session: s }: { session: SessionDTO }) {
     : () => void send({ type: 'showSession', sessionId: s.id });
   return (
     <li
-      class={`session ${s.state} ${s.agentType}`}
+      class={`session ${s.state} ${s.agentType}${s.isActive ? ' active' : ''}`}
       onClick={onClick}
       title={isStopped ? 'Click to resume' : 'Click to focus terminal'}
     >
@@ -192,6 +193,13 @@ export function Card({
           <StatusBadge status={worktree.status} />
         )}
         <div class="header-actions">
+          <button
+            class="ghost icon-btn"
+            title="Copy files from main repo into this worktree…"
+            onClick={() => void send({ type: 'copyFilesToWorktree', path: worktree.path })}
+          >
+            <FilePlusIcon size={11} />
+          </button>
           <button class="ghost icon-btn" title="Rename" onClick={startEdit}>
             <EditIcon size={11} />
           </button>

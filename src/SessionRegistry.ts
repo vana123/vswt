@@ -49,6 +49,7 @@ export class SessionRegistry {
   private terminalListener: vscode.Disposable | null = null;
   private context: vscode.ExtensionContext | null = null;
   private readonly userStopRequested = new Set<string>();
+  private activeId: string | null = null;
 
   init(context?: vscode.ExtensionContext): vscode.Disposable {
     if (context) {
@@ -188,6 +189,17 @@ export class SessionRegistry {
     return null;
   }
 
+  getActiveId(): string | null {
+    return this.activeId;
+  }
+
+  setActiveTerminal(terminal: vscode.Terminal | undefined): void {
+    const next = terminal ? this.getSessionForTerminal(terminal)?.id ?? null : null;
+    if (next === this.activeId) return;
+    this.activeId = next;
+    this._onChange.fire();
+  }
+
   forWorktree(worktreePath: string): SessionInfo[] {
     const out: SessionInfo[] = [];
     for (const { info } of this.sessions.values()) {
@@ -259,6 +271,7 @@ export class SessionRegistry {
       if (entry.terminal === terminal) {
         const wasUserStop = this.userStopRequested.has(id);
         this.userStopRequested.delete(id);
+        if (this.activeId === id) this.activeId = null;
         if (wasUserStop) {
           // User pressed × in the sidebar → drop the session entirely.
           this.sessions.delete(id);

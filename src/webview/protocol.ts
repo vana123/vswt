@@ -31,6 +31,7 @@ export interface SessionDTO {
   label: string;
   state: SessionState;
   createdAt: number;
+  isActive: boolean;
 }
 
 export interface ExtraShellDTO {
@@ -58,6 +59,7 @@ export type RpcRequest =
   | { type: 'showFileDiff'; worktreePath: string; relativePath: string; statusCode: string }
   | { type: 'createPR'; path: string }
   | { type: 'finishWorktree'; path: string }
+  | { type: 'copyFilesToWorktree'; path: string }
   | { type: 'togglePin'; path: string }
   | { type: 'startSession'; worktreePath: string; agentType: AgentType; shellName?: string }
   | { type: 'stopSession'; sessionId: string }

@@ -141,9 +141,11 @@
           "default": [
             ".env",
             ".env.*",
-            ".claude/**"
+            ".claude/CLAUDE.md",
+            ".claude/agents/**",
+            ".claude/commands/**"
           ],
-          "description": "Glob patterns (relative to repo root) copied into a new worktree when the user opts in."
+          "description": "Glob patterns (relative to repo root) that seed the per-creation copy picker. Defaults are the portable subset — secrets and project-level Claude Code config. Avoids `.claude/settings.local.json` (host-specific) and `.claude/specs|worktrees|*.lock` (per-worktree state). User can deselect entries and add ad-hoc paths in the New Worktree flow."
         },
         "vswt.worktree.postCreateCommand": {
           "type": "string",

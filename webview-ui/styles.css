@@ -326,6 +326,11 @@ body {
 .session.stopped:hover { opacity: 1; }
 .session.stopped .session-icon { color: var(--vscode-textLink-foreground); }
 .session.claude .session-icon { color: var(--claude-orange); }
+.session.active {
+  border-left-color: var(--vscode-focusBorder);
+  background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground));
+}
+.session.active .session-label { font-weight: 700; }
 
 .session-icon { width: 14px; display: inline-flex; justify-content: center; }
 .session-label { flex: 1; }

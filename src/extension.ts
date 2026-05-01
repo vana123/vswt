@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GitOps } from './git/GitOps';
@@ -173,6 +174,7 @@ async function buildState(
     worktrees = [];
   }
 
+  const activeId = registry.getActiveId();
   const sessions: SessionDTO[] = [];
   for (const w of worktrees) {
     for (const s of registry.forWorktree(w.path)) {
@@ -183,7 +185,8 @@ async function buildState(
         agentType: s.agentType,
         label: s.label,
         state: s.state,
-        createdAt: s.createdAt
+        createdAt: s.createdAt,
+        isActive: s.id === activeId && s.state === 'running'
       });
     }
   }
@@ -195,6 +198,116 @@ async function buildState(
   }));
 
   return { repoLabel, worktrees, sessions, extraShells };
+}
+
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Resolve a single pattern (relative to repoRoot) to a list of absolute source paths. */
+async function resolveCopyPattern(repoRoot: string, pattern: string): Promise<string[]> {
+  // Recursive: `dir/**` or `dir/**/*` — keep the dir, fs.cp will recurse.
+  const recursive = pattern.match(/^([^*]+)\/\*\*(?:\/\*)?$/);
+  if (recursive && recursive[1]) {
+    const full = path.join(repoRoot, recursive[1]);
+    return (await fileExists(full)) ? [full] : [];
+  }
+  // Trailing slash → treat as a directory to copy whole.
+  if (pattern.endsWith('/')) {
+    const full = path.join(repoRoot, pattern.replace(/\/+$/, ''));
+    return (await fileExists(full)) ? [full] : [];
+  }
+  // Filename glob: `.env.*`, `*.local` — single `*` in basename, no slash after.
+  if (pattern.includes('*')) {
+    const dir = path.join(repoRoot, path.dirname(pattern));
+    const filename = path.basename(pattern);
+    const re = new RegExp('^' + filename.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$');
+    try {
+      const entries = await fs.readdir(dir);
+      return entries.filter(e => re.test(e)).map(e => path.join(dir, e));
+    } catch {
+      return [];
+    }
+  }
+  // Exact path.
+  const full = path.join(repoRoot, pattern);
+  return (await fileExists(full)) ? [full] : [];
+}
+
+/** Resolve all configured patterns into a deduplicated list of absolute paths. */
+async function resolveAllCopyPatterns(repoRoot: string, patterns: string[]): Promise<string[]> {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const pattern of patterns) {
+    const matches = await resolveCopyPattern(repoRoot, pattern);
+    for (const m of matches) {
+      if (!seen.has(m)) {
+        seen.add(m);
+        result.push(m);
+      }
+    }
+  }
+  return result;
+}
+
+async function pickCopyPaths(repoRoot: string, output: vscode.OutputChannel): Promise<string[] | null> {
+  const patterns = getSettings().worktreeCopyFiles;
+  const detected = patterns.length > 0 ? await resolveAllCopyPatterns(repoRoot, patterns) : [];
+
+  const BROWSE = '__browse__';
+  type Item = vscode.QuickPickItem & { src: string };
+  const items: Item[] = detected.map(src => ({
+    label: path.relative(repoRoot, src),
+    picked: true,
+    src
+  }));
+  items.push({
+    label: '$(folder-opened) Pick more files/folders…',
+    description: 'opens system file picker',
+    picked: false,
+    src: BROWSE
+  });
+
+  const picked = await vscode.window.showQuickPick(items, {
+    canPickMany: true,
+    placeHolder: 'Select files/folders to copy (Esc = cancel, Enter with none = skip)'
+  });
+  if (picked === undefined) return null;
+
+  const result: string[] = [];
+  let browseSelected = false;
+  for (const p of picked) {
+    if (p.src === BROWSE) browseSelected = true;
+    else result.push(p.src);
+  }
+
+  if (browseSelected) {
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: true,
+      canSelectMany: true,
+      defaultUri: vscode.Uri.file(repoRoot),
+      title: 'Pick files/folders to copy from the main repo'
+    });
+    if (uris) {
+      for (const uri of uris) {
+        const abs = uri.fsPath;
+        const rel = path.relative(repoRoot, abs);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) {
+          output.appendLine(`[vsWT]   ! skipped (outside repo): ${abs}`);
+          continue;
+        }
+        if (!result.includes(abs)) result.push(abs);
+      }
+    }
+  }
+
+  return result;
 }
 
 async function createWorktreeFlow(
@@ -240,20 +353,28 @@ async function createWorktreeFlow(
     // Listing branches failed — fall back to current HEAD silently.
   }
 
-  const copyChoice = await vscode.window.showQuickPick(
-    [
-      { label: 'No', value: false, description: 'Skip secrets/config copy' },
-      { label: 'Yes — copy .env*, .claude/**', value: true, description: 'From vswt.worktree.copyFiles' }
-    ],
-    { placeHolder: 'Copy local config files into the new worktree?' }
-  );
-  if (!copyChoice) return;
+  const copyPaths = await pickCopyPaths(repoRoot, output);
+  if (copyPaths === null) return;
+
+  let initSubmodules = false;
+  if (await fileExists(path.join(repoRoot, '.gitmodules'))) {
+    const submoduleChoice = await vscode.window.showQuickPick(
+      [
+        { label: 'Yes', value: true, description: 'git submodule update --init --recursive' },
+        { label: 'No', value: false, description: 'Skip — faster, init later if needed' }
+      ],
+      { placeHolder: 'Initialize submodules?' }
+    );
+    if (!submoduleChoice) return;
+    initSubmodules = submoduleChoice.value;
+  }
 
   output.show(true);
   try {
     const opts: Parameters<WorktreeManager['create']>[0] = {
       branch: branch.trim(),
-      copyEnv: copyChoice.value,
+      copyPaths,
+      initSubmodules,
       output
     };
     if (fromRef) opts.fromRef = fromRef;
@@ -583,6 +704,42 @@ async function finishWorktreeFlow(
   );
 }
 
+async function copyFilesToExistingWorktreeFlow(
+  worktreePath: string,
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+  refresh: () => Promise<void>
+): Promise<void> {
+  const repoRoot = await ensureRepo(context);
+  if (!repoRoot) return;
+
+  const list = await new WorktreeManager(repoRoot).list();
+  const target = list.find(w => w.path === worktreePath);
+  if (!target) {
+    void vscode.window.showWarningMessage(`vsWT: worktree not found: ${worktreePath}`);
+    return;
+  }
+
+  const copyPaths = await pickCopyPaths(repoRoot, output);
+  if (copyPaths === null) return;
+  if (copyPaths.length === 0) {
+    void vscode.window.showInformationMessage('vsWT: nothing selected to copy.');
+    return;
+  }
+
+  output.show(true);
+  try {
+    await new WorktreeManager(repoRoot).addFiles(target.path, copyPaths, output);
+    await refresh();
+    void vscode.window.showInformationMessage(
+      `vsWT: copied ${copyPaths.length} item(s) into '${target.branch}'.`
+    );
+  } catch (err) {
+    output.appendLine(`[vsWT] ERROR: ${(err as Error).message}`);
+    void vscode.window.showErrorMessage(`vsWT: ${(err as Error).message}`);
+  }
+}
+
 async function showFileDiffFlow(
   worktreePath: string,
   relativePath: string,
@@ -827,6 +984,10 @@ export function activate(context: vscode.ExtensionContext): void {
         await finishWorktreeFlow(req.path, context, output, registry, refreshState);
         return undefined;
 
+      case 'copyFilesToWorktree':
+        await copyFilesToExistingWorktreeFlow(req.path, context, output, refreshState);
+        return undefined;
+
       case 'togglePin': {
         const pinned = getPinnedPaths(context);
         await setPinned(context, req.path, !pinned.has(req.path));
@@ -882,10 +1043,11 @@ export function activate(context: vscode.ExtensionContext): void {
   void initSettings().then(() => void refreshState());
 
   // Track when the active terminal belongs to vsWT so the Ctrl+V keybinding
-  // only fires inside our sessions.
+  // only fires inside our sessions, and to drive the active-session highlight.
   const updateTerminalContext = (term: vscode.Terminal | undefined): void => {
     const isOurs = term !== undefined && registry.getSessionForTerminal(term) !== null;
     void vscode.commands.executeCommand('setContext', 'vswt.terminalActive', isOurs);
+    registry.setActiveTerminal(term);
   };
   updateTerminalContext(vscode.window.activeTerminal);
 

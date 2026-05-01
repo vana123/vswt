@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -221,13 +221,34 @@ export class GitOps {
     await this.git('branch', force ? '-D' : '-d', name);
   }
 
-  /** Run `git submodule update --init --recursive` in a target directory (e.g., a fresh worktree). */
-  async initSubmodulesIn(cwd: string): Promise<void> {
-    try {
-      await execFileAsync('git', ['submodule', 'update', '--init', '--recursive'], { cwd, maxBuffer: MAX_BUFFER });
-    } catch (err) {
-      throw toGitError('git submodule update --init failed', err);
-    }
+  /**
+   * Run `git submodule update --init --recursive` streaming each line of stdout/stderr
+   * to the optional callback so callers can surface live progress.
+   */
+  async initSubmodulesIn(cwd: string, onLine?: (line: string) => void): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const child = spawn('git', ['submodule', 'update', '--init', '--recursive'], { cwd });
+      const stderrChunks: string[] = [];
+      const emitLines = (chunk: Buffer | string, capture = false): void => {
+        const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        if (capture) stderrChunks.push(text);
+        if (!onLine) return;
+        for (const line of text.split(/\r?\n/)) {
+          if (line.length > 0) onLine(line);
+        }
+      };
+      child.stdout?.on('data', d => emitLines(d));
+      child.stderr?.on('data', d => emitLines(d, true));
+      child.on('error', err => reject(err));
+      child.on('close', code => {
+        if (code === 0) {
+          resolve();
+        } else {
+          const stderr = stderrChunks.join('');
+          reject(new GitError(`git submodule update --init failed (exit ${code})\n${stderr}`.trim(), stderr, code));
+        }
+      });
+    });
   }
 
   private async git(...args: string[]): Promise<string> {

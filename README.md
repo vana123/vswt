@@ -30,8 +30,12 @@ without disturbing your other in-flight work.
 ## Features
 
 ### Worktree lifecycle
-- **Create** — pick branch name, base ref (any local/remote), opt-in copy of
-  `.env*` and `.claude/**`. Sibling layout `../{repo}-worktrees/{branch}`.
+- **Create** — pick branch name, base ref (any local/remote), then a
+  multi-select picker pre-populated from `vswt.worktree.copyFiles` plus an
+  input box for ad-hoc extras (e.g. `docker-compose.override.yml`). When
+  `.gitmodules` is present, an additional toggle controls
+  `git submodule update --init --recursive`. Sibling layout
+  `../{repo}-worktrees/{branch}`.
 - **Rename** — double-click the branch label or use ✎. Handles submodules
   (falls back to `fs.rename` + `git worktree repair`).
 - **Remove** — confirms with file count if dirty; auto-retries with `--force`
@@ -83,8 +87,8 @@ without disturbing your other in-flight work.
 | Setting | Default | Description |
 |---|---|---|
 | `vswt.worktree.parentDir` | `""` | Parent dir for worktrees. Empty = sibling `../{repo}-worktrees`. Supports `~`. |
-| `vswt.worktree.copyFiles` | `[".env", ".env.*", ".claude/**"]` | Glob patterns copied into a new worktree (opt-in per session). |
-| `vswt.worktree.postCreateCommand` | `""` | Shell command run inside a fresh worktree (e.g. `pnpm i`). |
+| `vswt.worktree.copyFiles` | `[".env", ".env.*", ".claude/CLAUDE.md", ".claude/agents/**", ".claude/commands/**"]` | Glob patterns seeding the per-creation copy picker. Defaults are the portable subset (skips `settings.local.json`, `specs/`, `worktrees/`, lock files). User can deselect or add custom paths each time. |
+| `vswt.worktree.postCreateCommand` | `""` | Shell command run inside a fresh worktree. Set to `npm install` / `pnpm i` / `bun install` so each new worktree is self-contained without manual setup. |
 | `vswt.worktree.runPrismaGenerate` | `true` | Run `npx prisma generate` if `prisma/schema.prisma` exists. |
 | `vswt.shell.windows` | `""` | Windows shell override for Shell sessions. Empty = auto. |
 | `vswt.notifications.sound` | `true` | Reserved for future state-detection. |
