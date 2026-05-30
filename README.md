@@ -1,74 +1,114 @@
 # vsWT — Worktree Orchestrator
 
-Run parallel **Claude Code** sessions in VS Code, each in its own git worktree.
-Inspired by [Scape](https://news.ycombinator.com/item?id=47257712), built as an
-inline VS Code extension. Cross-platform (Windows / macOS / Linux).
+**Run many Claude Code sessions in parallel without losing your mind.**
+vsWT turns the VS Code sidebar into a control panel where every branch you're
+working on lives in its own git worktree, with its own Claude (or Shell)
+session — so you can spin up a feature, leave it running, jump to a hotfix,
+review a third branch, and switch back with one click without disturbing any
+of the other terminals or repo state.
 
-> **Status:** Pre-alpha. Daily-driver-ready for Claude Code workflow but
-> rough edges remain. Feedback welcome at
+Cross-platform (Windows / macOS / Linux). Inspired by
+[Scape](https://news.ycombinator.com/item?id=47257712), reimagined as a native
+VS Code extension that lives where you already work.
+
+> **Status:** Pre-alpha. Daily-driver-ready for the Claude Code workflow, but
+> rough edges remain. Bug reports and feature requests are very welcome at
 > [github.com/vana123/vswt/issues](https://github.com/vana123/vswt/issues).
 
-## What it does
+## Why vsWT
 
-vsWT turns the VS Code sidebar into a control panel for parallel Claude Code
-sessions. Each branch you're working on lives in its own git worktree, with
-its own Claude (or Shell) session, so you can switch context with one click
-without disturbing your other in-flight work.
+- **Real parallelism, not tab-switching.** A git worktree is a separate
+  checkout of the same repo on a different branch — Claude in worktree A
+  cannot break the build in worktree B, and you never have to `git stash`
+  to context-switch.
+- **One pane of glass.** Status, dirty count, ahead/behind, changed files,
+  existing Claude sessions, push, PR, and merge-and-cleanup all hang off one
+  worktree row in a single tree.
+- **No new tool to learn.** It's a tree in the sidebar. The Claude CLI runs
+  in a normal VS Code terminal you can detach, reattach, or kill.
+
+## What it looks like
+
+A single tree: repository → worktrees → the Claude sessions that ran in them.
+Worktree actions live in the right-click menu; sessions resume on click.
 
 ```
-📁 my-project                        change
-🌿 feat/auth ← main         ●3 ↑1   ↓ ↑ ⟳   ✎ ×
-   ✦ Claude       3m ago    ×
-   > Shell        1m ago    ×
-   [✦ Claude ▾] [> Shell ▾] [Term]
-   [Open ↗] [PR] [Finish ✓]
-🌿 fix/login ← main          ·       ↓ ↑ ⟳   ✎ ×
-   [✦ Claude ▾] [> Shell ▾] [Term]
-[ + New Worktree ]
+vsWT — Worktrees
+└─ my-project
+   ├─ ⎇ main          ~/dev/my-project                ●3 ↑1
+   │   ├─ ⊟ Changes (3)
+   │   │   └─ src/auth.ts
+   │   ├─ 💬 Refactor auth                  2h ago
+   │   └─ 💬 Fix payments allocation        yesterday
+   ├─ ⎇ feature-ksef   ~/dev/my-project-worktrees/feature-ksef
+   │   └─ 💬 Plan KSeF integration          3d ago
+   └─ ⎇ hotfix-csv     ~/dev/…                          —
 ```
+
+The worktree matching the open folder is highlighted; pinned worktrees sort to
+the top; a worktree with no sessions shows `—`. Worktrees created by
+`claude --worktree` (those under `<repo>/.claude/worktrees/`) get a ✦ sparkle
+icon to set them apart from regular ones.
+
+**Open a folder of projects.** If the folder you open isn't itself a git repo,
+vsWT scans its subfolders for repositories and lists each as its own top-level
+node — so a `~/dev` containing many projects shows them all, each expandable into
+its worktrees and sessions. Scan depth is configurable (`vswt.repoScanDepth`,
+default 1); linked worktree folders fold into their main repo, not duplicated.
 
 ## Features
 
 ### Worktree lifecycle
 - **Create** — pick branch name, base ref (any local/remote), opt-in copy of
   `.env*` and `.claude/**`. Sibling layout `../{repo}-worktrees/{branch}`.
-- **Rename** — double-click the branch label or use ✎. Handles submodules
-  (falls back to `fs.rename` + `git worktree repair`).
+- **Rename** — right-click → *Rename…*. Handles submodules (falls back to
+  `fs.rename` + `git worktree repair`).
 - **Remove** — confirms with file count if dirty; auto-retries with `--force`
   on submodule errors; cleans orphan dirs via `fs.rm` when git refuses.
-- **Pin** — favourites pin to top.
-- **Filter** — search input appears once you have 3+ worktrees.
+- **Pin** — right-click → *Pin to Top* / *Unpin*.
 
-### Sessions per worktree
-- **Claude** sessions launch the Claude Code CLI inside a tracked terminal.
-- **Shell** sessions open your default shell. A dropdown lets you pick
-  Git Bash / CMD / PowerShell on Windows, or Zsh / Fish on Linux/macOS,
-  detected at activation time.
-- **Term** opens a one-off plain terminal in the worktree without tracking.
-- Sessions persist across window reload as `▶ stopped` for one-click resume.
-- Closing a session via the sidebar `×` also closes the terminal; closing the
-  terminal tab keeps the session as resumable.
+### Claude sessions
+- Lists the **existing** Claude sessions found in `~/.claude/projects`, grouped
+  under the worktree they ran in — matched by the working directory recorded in
+  each transcript, so sessions started *outside* vsWT (a plain terminal, another
+  tool) show up too.
+- **Click to resume** — opens a terminal in the worktree and runs
+  `claude --resume <id>`.
+- **Rename** a session to a custom label — stored as an overlay in the
+  extension (Claude's transcript is never modified); empty input resets it to
+  Claude's title.
+- **Reveal transcript** opens the raw `.jsonl`; **Copy session id** copies it.
+- **Start in a fresh worktree** — right-click a repository → *New Claude Session
+  (new worktree)* runs `claude --worktree`, which creates an isolated git
+  worktree for the session; it then shows up in the tree like any other.
+- Clicking a session reuses its terminal if one is still open, instead of
+  spawning a duplicate.
+- Sessions outside the current repo can be shown under an optional *Other* node
+  (`vswt.sessions.showUnmatched`).
+- **Live refresh** — a file watcher on the projects directory updates the tree
+  within ~1s as sessions are created or change.
+
+### Per-worktree actions (right-click)
+- **New Claude / New Shell / Term here** — open a terminal in the worktree.
+  The shell picker offers Git Bash / CMD / PowerShell on Windows, or
+  Zsh / Fish on Linux/macOS, detected at activation time.
+- On Windows, `Ctrl+V` in a vsWT-opened terminal pastes a clipboard image as a
+  PNG `@<path>` reference for Claude.
 
 ### Git workflow
-- **Status badges** on each card: `●N` dirty count, `↑N` ahead, `↓N` behind.
-- **Inline diff** — click the badge to expand the changed-files list, click a
-  file to open VS Code's diff editor against HEAD.
-- **Pull / Push / Fetch** buttons in the header. Pull recovers automatically
-  by setting upstream when `origin/<branch>` exists; push auto-sets upstream
-  on first push.
+- **Status badges** on each worktree row: `●N` dirty count, `↑N` ahead, `↓N`
+  behind; full path, HEAD, flags and fork-point in the tooltip.
+- **Changes** — expand a worktree's *Changes* node and click a file to open
+  VS Code's diff editor against HEAD.
+- **Pull / Push / Fetch**. Pull recovers automatically by setting upstream when
+  `origin/<branch>` exists; push auto-sets upstream on first push.
 - **Create PR** via `gh pr create --web` — auto-pushes the branch first if
   needed.
 - **Finish** — full lifecycle close-out: push feature → checkout target → pull
   → merge (`--no-ff` or `--squash`) → push → remove worktree → delete branch.
   Pre-flight check refuses to run if main repo has uncommitted changes.
-
-### UX
-- **Activity Bar badge** + **status bar item** show active session count.
-- **Base branch** tracking — vsWT remembers what you forked from and shows
-  it as `← main`; pre-selects it in the Finish merge picker.
-- **Pixel-art aesthetic** — Pixelify Sans font, hard borders, drop shadows.
-- **Real branding** — official Anthropic Claude symbol (CC0 — Wikimedia
-  Commons), [Lucide](https://lucide.dev) icons (ISC) for actions.
+- **Base branch** tracking — vsWT remembers what you forked from and pre-selects
+  it in the Finish merge picker.
 
 ## Requirements
 
@@ -82,18 +122,21 @@ without disturbing your other in-flight work.
 
 | Setting | Default | Description |
 |---|---|---|
+| `vswt.repoScanDepth` | `1` | Levels below each workspace folder to scan for repos. `0` = the folder itself; `1` = direct subfolders. |
 | `vswt.worktree.parentDir` | `""` | Parent dir for worktrees. Empty = sibling `../{repo}-worktrees`. Supports `~`. |
 | `vswt.worktree.copyFiles` | `[".env", ".env.*", ".claude/**"]` | Glob patterns copied into a new worktree (opt-in per session). |
 | `vswt.worktree.postCreateCommand` | `""` | Shell command run inside a fresh worktree (e.g. `pnpm i`). |
 | `vswt.worktree.runPrismaGenerate` | `true` | Run `npx prisma generate` if `prisma/schema.prisma` exists. |
 | `vswt.shell.windows` | `""` | Windows shell override for Shell sessions. Empty = auto. |
-| `vswt.notifications.sound` | `true` | Reserved for future state-detection. |
 | `vswt.claude.path` | `"claude"` | Path to the Claude Code CLI. |
 | `vswt.extraShells` | `null` | Extra shell options. `null` = platform defaults; `[]` = none. |
+| `vswt.sessions.showUnmatched` | `false` | Show sessions outside the current repo under an *Other* node. |
+| `vswt.sessions.projectsDir` | `""` | Claude transcripts dir. Empty = `~/.claude/projects`. Supports `~`. |
+| `vswt.sessions.resumeCommand` | `""` | Resume command; session id is appended. Empty = `<claude.path> --resume`. |
+| `vswt.sessions.label` | `"name"` | Session label source: `name` (AI title) or `firstMessage`. |
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
 Claude logo (CC0) from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Claude_AI_symbol.svg).
-Action icons from [Lucide](https://lucide.dev) (ISC).

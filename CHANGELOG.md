@@ -4,6 +4,50 @@ All notable changes to vsWT will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.0] — 2026-05-30
+
+### Changed
+- **Unified into a single tree view.** The Preact webview is gone; everything
+  now lives in one native VS Code tree: repository → worktrees → the Claude
+  sessions that ran in them. Worktree actions (create, rename, remove, pin,
+  pull/push/fetch, PR, finish, open-in-window, new Claude/Shell/terminal) moved
+  to the view title and right-click menus; changed files expand under each
+  worktree and open a diff against HEAD on click.
+
+### Added
+- **Claude session explorer.** Reads existing transcripts from
+  `~/.claude/projects` and groups each session under its worktree by the working
+  directory recorded in the transcript — so sessions started outside vsWT are
+  visible too. Click to `claude --resume`, or reveal the transcript / copy the
+  id. Optional *Other* node for sessions outside the current repo
+  (`vswt.sessions.showUnmatched`). A file watcher refreshes the tree live.
+- **Multi-repo discovery.** Open a folder that contains several projects and
+  vsWT scans its subfolders for git repositories, listing each as its own
+  top-level node. Linked worktree folders fold into their main repo (resolved
+  via `git rev-parse --git-common-dir`) instead of appearing twice. Scan depth
+  is configurable.
+- **Claude-created worktrees are marked** with a ✦ sparkle icon (those under
+  `<repo>/.claude/worktrees/`, where `claude --worktree` puts them); regular
+  worktrees keep the branch icon. `claude-created` also shows in the tooltip.
+- **Rename a session** to a custom label (stored as an overlay in extension
+  state; Claude's transcript is never touched). Empty input resets to the title.
+- **Start a session in a fresh worktree** — a repository's right-click menu has
+  *New Claude Session (new worktree)*, which runs `claude --worktree` so Claude
+  creates an isolated git worktree for the session; it then appears in the tree.
+- Settings: `vswt.sessions.showUnmatched`, `vswt.sessions.projectsDir`,
+  `vswt.sessions.resumeCommand`, `vswt.sessions.label`, `vswt.repoScanDepth`.
+
+### Fixed
+- Clicking a session now reuses its open terminal instead of spawning a new one
+  on every click.
+
+### Removed
+- The webview UI and its managed-session registry. "Active session" tracking and
+  the activity-bar / status-bar session badge are gone — sessions are now sourced
+  from on-disk transcripts (resume), not live in-window terminals. The
+  `vswt.notifications.sound` setting (reserved, unused) was dropped.
+- Unused `node-pty` / Preact dependencies.
+
 ## [0.0.2] — 2026-04-26
 
 ### Added

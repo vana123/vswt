@@ -20,8 +20,6 @@ export interface VswtConfig {
   worktreeRunPrismaGenerate: boolean;
   /** Windows shell override (`pwsh.exe`, `powershell.exe`, `cmd.exe`). Empty = auto. */
   shellWindows: string;
-  /** Play OS sound on session state transitions. */
-  notificationsSound: boolean;
   /** Path or command name for Claude Code CLI. Default: `claude`. */
   claudePath: string;
   /** Additional shell options exposed as session buttons (e.g. Git Bash, CMD). */
@@ -112,7 +110,6 @@ export function getSettings(): VswtConfig {
     worktreePostCreateCommand: cfg.get<string>('worktree.postCreateCommand') ?? '',
     worktreeRunPrismaGenerate: cfg.get<boolean>('worktree.runPrismaGenerate') ?? true,
     shellWindows: cfg.get<string>('shell.windows') ?? '',
-    notificationsSound: cfg.get<boolean>('notifications.sound') ?? true,
     claudePath: cfg.get<string>('claude.path') ?? 'claude',
     extraShells
   };

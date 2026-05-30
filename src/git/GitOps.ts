@@ -17,6 +17,8 @@ export interface WorktreeInfo {
   head: string;
   bare: boolean;
   detached: boolean;
+  locked: boolean;
+  prunable: boolean;
 }
 
 export interface WorktreeStatus {
@@ -282,14 +284,18 @@ function parseWorktreePorcelain(text: string): WorktreeInfo[] {
     let branch: string | null = null;
     let bare = false;
     let detached = false;
+    let locked = false;
+    let prunable = false;
     for (const line of block.split('\n')) {
       if (line.startsWith('worktree ')) path = line.slice('worktree '.length);
       else if (line.startsWith('HEAD ')) head = line.slice('HEAD '.length);
       else if (line.startsWith('branch ')) branch = line.slice('branch '.length).replace(/^refs\/heads\//, '');
       else if (line === 'bare') bare = true;
       else if (line === 'detached') detached = true;
+      else if (line === 'locked' || line.startsWith('locked ')) locked = true;
+      else if (line === 'prunable' || line.startsWith('prunable ')) prunable = true;
     }
-    if (path) out.push({ path, head, branch, bare, detached });
+    if (path) out.push({ path, head, branch, bare, detached, locked, prunable });
   }
   return out;
 }

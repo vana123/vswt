@@ -1,8 +1,8 @@
 {
   "name": "vswt",
   "displayName": "vsWT — Worktree Orchestrator",
-  "description": "Run parallel Claude Code sessions, each in its own git worktree, from the VS Code sidebar.",
-  "version": "0.0.2",
+  "description": "Orchestrate parallel Claude Code sessions in VS Code — a worktree tree with built-in create / diff / pull / push / PR / finish flow and one-click resume of existing Claude sessions.",
+  "version": "0.1.0",
   "publisher": "vana123",
   "license": "MIT",
   "engines": {
@@ -16,10 +16,16 @@
   "keywords": [
     "claude",
     "claude code",
+    "anthropic",
     "agents",
+    "ai",
+    "git",
     "git worktree",
+    "worktrees",
     "parallel",
-    "anthropic"
+    "orchestrator",
+    "sidebar",
+    "terminal"
   ],
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -36,7 +42,7 @@
   "homepage": "https://github.com/vana123/vswt#readme",
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onView:vswt.sidebar"
+    "onView:vswt.sessions"
   ],
   "contributes": {
     "viewsContainers": {
@@ -51,8 +57,8 @@
     "views": {
       "vswt": [
         {
-          "type": "webview",
-          "id": "vswt.sidebar",
+          "type": "tree",
+          "id": "vswt.sessions",
           "name": "Worktrees",
           "icon": "media/icon.svg",
           "contextualTitle": "vsWT"
@@ -72,30 +78,144 @@
         "icon": "$(add)"
       },
       {
-        "command": "vswt.refreshWorktrees",
+        "command": "vswt.repo.newWorktree",
+        "title": "New Worktree…",
+        "category": "vsWT",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vswt.repo.newClaudeWorktree",
+        "title": "New Claude Session (new worktree)",
+        "category": "vsWT",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "vswt.repo.openWindow",
+        "title": "Open in New Window",
+        "category": "vsWT",
+        "icon": "$(empty-window)"
+      },
+      {
+        "command": "vswt.pasteImage",
+        "title": "Paste Image to Active Session",
+        "category": "vsWT"
+      },
+      {
+        "command": "vswt.sessions.refresh",
         "title": "Refresh",
         "category": "vsWT",
         "icon": "$(refresh)"
       },
       {
-        "command": "vswt.pickRepo",
-        "title": "Pick Repository…",
+        "command": "vswt.sessions.toggleUnmatched",
+        "title": "Toggle Sessions Outside This Repo",
         "category": "vsWT",
-        "icon": "$(repo)"
+        "icon": "$(filter)"
       },
       {
-        "command": "vswt.startClaudeSession",
-        "title": "Start Claude Session",
+        "command": "vswt.sessions.resume",
+        "title": "Resume in Terminal",
+        "category": "vsWT",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "vswt.sessions.rename",
+        "title": "Rename Session…",
+        "category": "vsWT",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "vswt.sessions.revealTranscript",
+        "title": "Reveal Transcript",
+        "category": "vsWT",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "vswt.sessions.copySessionId",
+        "title": "Copy Session ID",
+        "category": "vsWT",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "vswt.wt.newClaude",
+        "title": "New Claude Session Here",
+        "category": "vsWT",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "vswt.wt.newShell",
+        "title": "New Shell Session Here",
+        "category": "vsWT",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "vswt.wt.term",
+        "title": "Open Terminal Here",
         "category": "vsWT"
       },
       {
-        "command": "vswt.startShellSession",
-        "title": "Start Shell Session",
-        "category": "vsWT"
+        "command": "vswt.wt.pull",
+        "title": "Pull",
+        "category": "vsWT",
+        "icon": "$(arrow-down)"
       },
       {
-        "command": "vswt.pasteImage",
-        "title": "Paste Image to Active Session",
+        "command": "vswt.wt.push",
+        "title": "Push",
+        "category": "vsWT",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "vswt.wt.fetch",
+        "title": "Fetch",
+        "category": "vsWT",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "vswt.wt.openWindow",
+        "title": "Open in New Window",
+        "category": "vsWT",
+        "icon": "$(empty-window)"
+      },
+      {
+        "command": "vswt.wt.pr",
+        "title": "Create PR",
+        "category": "vsWT",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "vswt.wt.finish",
+        "title": "Finish (merge & remove)",
+        "category": "vsWT",
+        "icon": "$(check)"
+      },
+      {
+        "command": "vswt.wt.rename",
+        "title": "Rename Worktree…",
+        "category": "vsWT",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "vswt.wt.pin",
+        "title": "Pin to Top",
+        "category": "vsWT",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "vswt.wt.unpin",
+        "title": "Unpin",
+        "category": "vsWT",
+        "icon": "$(pinned)"
+      },
+      {
+        "command": "vswt.wt.remove",
+        "title": "Remove Worktree",
+        "category": "vsWT",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "vswt.wt.showDiff",
+        "title": "Open Diff",
         "category": "vsWT"
       }
     ],
@@ -110,24 +230,247 @@
       "view/title": [
         {
           "command": "vswt.createWorktree",
-          "when": "view == vswt.sidebar",
+          "when": "view == vswt.sessions",
           "group": "navigation@1"
         },
         {
-          "command": "vswt.refreshWorktrees",
-          "when": "view == vswt.sidebar",
+          "command": "vswt.sessions.refresh",
+          "when": "view == vswt.sessions",
           "group": "navigation@2"
         },
         {
-          "command": "vswt.pickRepo",
-          "when": "view == vswt.sidebar",
-          "group": "1_config@1"
+          "command": "vswt.sessions.toggleUnmatched",
+          "when": "view == vswt.sessions",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "vswt.repo.newClaudeWorktree",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsRepo",
+          "group": "inline@1"
+        },
+        {
+          "command": "vswt.repo.newWorktree",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsRepo",
+          "group": "inline@2"
+        },
+        {
+          "command": "vswt.repo.newClaudeWorktree",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsRepo",
+          "group": "1_repo@1"
+        },
+        {
+          "command": "vswt.repo.newWorktree",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsRepo",
+          "group": "1_repo@2"
+        },
+        {
+          "command": "vswt.repo.openWindow",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsRepo",
+          "group": "1_repo@3"
+        },
+        {
+          "command": "vswt.wt.newClaude",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "inline@1"
+        },
+        {
+          "command": "vswt.wt.newClaude",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "1_session@1"
+        },
+        {
+          "command": "vswt.wt.newShell",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "1_session@2"
+        },
+        {
+          "command": "vswt.wt.term",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "1_session@3"
+        },
+        {
+          "command": "vswt.wt.pull",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "2_git@1"
+        },
+        {
+          "command": "vswt.wt.push",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "2_git@2"
+        },
+        {
+          "command": "vswt.wt.fetch",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "2_git@3"
+        },
+        {
+          "command": "vswt.wt.openWindow",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "3_manage@1"
+        },
+        {
+          "command": "vswt.wt.pr",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "3_manage@2"
+        },
+        {
+          "command": "vswt.wt.finish",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "3_manage@3"
+        },
+        {
+          "command": "vswt.wt.rename",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "4_edit@1"
+        },
+        {
+          "command": "vswt.wt.pin",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsWorktree.unpinned",
+          "group": "4_edit@2"
+        },
+        {
+          "command": "vswt.wt.unpin",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsWorktree.pinned",
+          "group": "4_edit@2"
+        },
+        {
+          "command": "vswt.wt.remove",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "4_edit@3"
+        },
+        {
+          "command": "vswt.sessions.resume",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsSession",
+          "group": "inline@1"
+        },
+        {
+          "command": "vswt.sessions.rename",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsSession",
+          "group": "inline@2"
+        },
+        {
+          "command": "vswt.sessions.rename",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsSession",
+          "group": "1_session@1"
+        },
+        {
+          "command": "vswt.sessions.revealTranscript",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsSession",
+          "group": "1_session@2"
+        },
+        {
+          "command": "vswt.sessions.copySessionId",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsSession",
+          "group": "1_session@3"
+        },
+        {
+          "command": "vswt.wt.showDiff",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsFile",
+          "group": "inline@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "vswt.openSidebar",
+          "when": "false"
+        },
+        {
+          "command": "vswt.repo.newWorktree",
+          "when": "false"
+        },
+        {
+          "command": "vswt.repo.newClaudeWorktree",
+          "when": "false"
+        },
+        {
+          "command": "vswt.repo.openWindow",
+          "when": "false"
+        },
+        {
+          "command": "vswt.sessions.resume",
+          "when": "false"
+        },
+        {
+          "command": "vswt.sessions.rename",
+          "when": "false"
+        },
+        {
+          "command": "vswt.sessions.revealTranscript",
+          "when": "false"
+        },
+        {
+          "command": "vswt.sessions.copySessionId",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.newClaude",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.newShell",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.term",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.pull",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.push",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.fetch",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.openWindow",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.pr",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.finish",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.rename",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.pin",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.unpin",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.remove",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.showDiff",
+          "when": "false"
         }
       ]
     },
     "configuration": {
       "title": "vsWT",
       "properties": {
+        "vswt.repoScanDepth": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "description": "How many directory levels below each workspace folder to scan for git repositories. 0 = only the folder itself; 1 = its direct subfolders."
+        },
         "vswt.worktree.parentDir": {
           "type": "string",
           "default": "",
@@ -160,15 +503,38 @@
           "default": "",
           "description": "Windows shell override for Shell sessions (`pwsh.exe`, `powershell.exe`, `cmd.exe`). Empty = auto."
         },
-        "vswt.notifications.sound": {
-          "type": "boolean",
-          "default": true,
-          "description": "Play OS sound on session state transitions (waiting input, approval needed, done)."
-        },
         "vswt.claude.path": {
           "type": "string",
           "default": "claude",
           "description": "Path or command name for the Claude Code CLI."
+        },
+        "vswt.sessions.showUnmatched": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show Claude sessions whose working directory is not a worktree of the current repository, grouped under an \"Other\" node."
+        },
+        "vswt.sessions.projectsDir": {
+          "type": "string",
+          "default": "",
+          "description": "Directory holding Claude session transcripts. Empty = ~/.claude/projects. Supports ~ expansion."
+        },
+        "vswt.sessions.resumeCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Command used to resume a session in the terminal; the session id is appended. Empty = \"<vswt.claude.path> --resume\"."
+        },
+        "vswt.sessions.label": {
+          "type": "string",
+          "enum": [
+            "name",
+            "firstMessage"
+          ],
+          "enumDescriptions": [
+            "Use Claude's generated session title, falling back to the first user message.",
+            "Use the first user message, falling back to the session title."
+          ],
+          "default": "name",
+          "description": "What to show as the Claude session label."
         },
         "vswt.extraShells": {
           "type": "array",
@@ -205,7 +571,7 @@
   "scripts": {
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.webview.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package"
   },
@@ -216,10 +582,5 @@
     "esbuild": "^0.24.0",
     "sharp": "^0.34.5",
     "typescript": "^5.6.0"
-  },
-  "dependencies": {
-    "@preact/signals": "^2.9.0",
-    "node-pty": "^1.1.0",
-    "preact": "^10.29.1"
   }
 }

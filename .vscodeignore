@@ -2,7 +2,6 @@
 .github/**
 .claude/**
 src/**
-webview-ui/**
 scripts/**
 node_modules/**
 **/*.ts

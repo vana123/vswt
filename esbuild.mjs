@@ -11,32 +11,16 @@ const extensionConfig = {
   platform: 'node',
   format: 'cjs',
   target: 'node20',
-  external: ['vscode', 'node-pty'],
-  sourcemap: dev,
-  minify: !dev,
-  logLevel: 'info'
-};
-
-/** @type {import('esbuild').BuildOptions} */
-const webviewConfig = {
-  entryPoints: ['webview-ui/index.tsx'],
-  bundle: true,
-  outfile: 'dist/webview.js',
-  platform: 'browser',
-  format: 'iife',
-  target: 'es2022',
-  jsx: 'automatic',
-  jsxImportSource: 'preact',
+  external: ['vscode'],
   sourcemap: dev,
   minify: !dev,
   logLevel: 'info'
 };
 
 if (watch) {
-  const ctxA = await context(extensionConfig);
-  const ctxB = await context(webviewConfig);
-  await Promise.all([ctxA.watch(), ctxB.watch()]);
-  console.log('[esbuild] watching extension + webview...');
+  const ctx = await context(extensionConfig);
+  await ctx.watch();
+  console.log('[esbuild] watching extension...');
 } else {
-  await Promise.all([build(extensionConfig), build(webviewConfig)]);
+  await build(extensionConfig);
 }

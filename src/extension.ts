@@ -1,21 +1,34 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
+import * as fs from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GitOps } from './git/GitOps';
 import { WorktreeManager } from './git/WorktreeManager';
-import { SessionRegistry, AgentType } from './SessionRegistry';
-import { SidebarHost } from './webview/SidebarHost';
-import { getSettings, initSettings } from './Settings';
-import { readClipboardImage, formatImageReference } from './clipboard';
-import type { AppState, RpcRequest, WorktreeDTO, SessionDTO, ExtraShellDTO } from './webview/protocol';
+import { initSettings } from './Settings';
+import { normalizePath } from './sessions/path-utils';
+import { registerSessionsExplorer } from './sessions/sessions-explorer';
 
 const execFileAsync = promisify(execFile);
-const MAX_FILES_PER_WORKTREE = 50;
 
-const STATE_KEY_REPO = 'vswt.selectedRepo';
 const STATE_KEY_PINNED = 'vswt.pinnedPaths';
 const STATE_KEY_BASES = 'vswt.worktreeBases';
+const STATE_KEY_SESSION_NAMES = 'vswt.sessionNames';
+
+function getSessionNames(context: vscode.ExtensionContext): Record<string, string> {
+  return { ...(context.globalState.get<Record<string, string>>(STATE_KEY_SESSION_NAMES) ?? {}) };
+}
+
+async function setSessionName(
+  context: vscode.ExtensionContext,
+  sessionId: string,
+  name: string
+): Promise<void> {
+  const names = getSessionNames(context);
+  if (name) names[sessionId] = name;
+  else delete names[sessionId];
+  await context.globalState.update(STATE_KEY_SESSION_NAMES, names);
+}
 
 function getPinnedPaths(context: vscode.ExtensionContext): Set<string> {
   return new Set(context.workspaceState.get<string[]>(STATE_KEY_PINNED) ?? []);
@@ -59,152 +72,85 @@ async function moveBase(
   }
 }
 
-async function getCurrentRepo(context: vscode.ExtensionContext): Promise<string | null> {
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders || folders.length === 0) return null;
-
-  const cached = context.workspaceState.get<string>(STATE_KEY_REPO);
-  if (cached && folders.some(f => f.uri.fsPath === cached)) {
-    if (await new GitOps(cached).isGitRepo()) return cached;
-  }
-
-  if (folders.length === 1) {
-    const single = folders[0]!.uri.fsPath;
-    if (await new GitOps(single).isGitRepo()) {
-      const root = (await new GitOps(single).getRepoRoot()).trim();
-      await context.workspaceState.update(STATE_KEY_REPO, root);
-      return root;
-    }
-  }
-  return null;
+function getRepoScanDepth(): number {
+  const n = vscode.workspace.getConfiguration('vswt').get<number>('repoScanDepth');
+  return typeof n === 'number' && n >= 0 ? Math.floor(n) : 1;
 }
 
-async function pickRepo(context: vscode.ExtensionContext): Promise<string | null> {
+/** Discover git repositories under the workspace folders, down to `depth` levels.
+ * Each candidate is resolved to its main repo root via `--git-common-dir`, so
+ * linked worktree folders fold into their repo instead of appearing twice. */
+async function discoverRepos(depth: number): Promise<string[]> {
   const folders = vscode.workspace.workspaceFolders;
-  if (!folders || folders.length === 0) {
-    void vscode.window.showErrorMessage('vsWT: open a folder in VS Code first.');
+  if (!folders || folders.length === 0) return [];
+
+  const candidates: string[] = [];
+  await Promise.all(folders.map(f => collectRepoCandidates(f.uri.fsPath, depth, candidates)));
+
+  const mains = new Map<string, string>();
+  await Promise.all(
+    candidates.map(async dir => {
+      const main = await mainRepoRoot(dir);
+      if (main) mains.set(normalizePath(main), main);
+    })
+  );
+  return [...mains.values()];
+}
+
+async function collectRepoCandidates(dir: string, depth: number, out: string[]): Promise<void> {
+  if (await new GitOps(dir).isGitRepo()) {
+    out.push(dir);
+    return;
+  }
+  if (depth <= 0) return;
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  await Promise.all(
+    entries.map(async e => {
+      if (!e.isDirectory() || e.name === 'node_modules' || e.name.startsWith('.')) return;
+      await collectRepoCandidates(path.join(dir, e.name), depth - 1, out);
+    })
+  );
+}
+
+async function mainRepoRoot(dir: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', dir, 'rev-parse', '--git-common-dir'], {
+      maxBuffer: 1024 * 1024
+    });
+    const common = stdout.trim();
+    if (!common) return null;
+    const abs = path.isAbsolute(common) ? common : path.resolve(dir, common);
+    return path.dirname(abs);
+  } catch {
     return null;
   }
+}
 
-  const probed = await Promise.all(
-    folders.map(async f => ({
-      label: f.name,
-      description: f.uri.fsPath,
-      fsPath: f.uri.fsPath,
-      isGit: await new GitOps(f.uri.fsPath).isGitRepo()
-    }))
-  );
-
-  const candidates = probed.filter(i => i.isGit);
-  if (candidates.length === 0) {
+async function pickRepoForCreate(): Promise<string | null> {
+  const repos = await discoverRepos(getRepoScanDepth());
+  if (repos.length === 0) {
     void vscode.window.showErrorMessage('vsWT: no git repository found in the workspace.');
     return null;
   }
-
-  const pick = candidates.length === 1
-    ? candidates[0]!
-    : await vscode.window.showQuickPick(
-        candidates.map(i => ({ label: i.label, description: i.description, fsPath: i.fsPath })),
-        { placeHolder: 'Pick the main repo for vsWT' }
-      );
-  if (!pick) return null;
-
-  const root = (await new GitOps(pick.fsPath).getRepoRoot()).trim();
-  await context.workspaceState.update(STATE_KEY_REPO, root);
-  return root;
-}
-
-async function ensureRepo(context: vscode.ExtensionContext): Promise<string | null> {
-  return (await getCurrentRepo(context)) ?? (await pickRepo(context));
-}
-
-async function buildState(
-  context: vscode.ExtensionContext,
-  registry: SessionRegistry
-): Promise<AppState> {
-  const repoRoot = await getCurrentRepo(context);
-  if (!repoRoot) {
-    return { repoLabel: '', worktrees: [], sessions: [], extraShells: [] };
-  }
-
-  const repoLabel = path.basename(repoRoot);
-  const pinned = getPinnedPaths(context);
-  const bases = getBases(context);
-  let worktrees: WorktreeDTO[] = [];
-  try {
-    const list = await new WorktreeManager(repoRoot).list();
-    worktrees = await Promise.all(
-      list.map(async w => {
-        const base = bases[w.path] ?? null;
-        try {
-          const wgit = new GitOps(w.path);
-          const [status, files] = await Promise.all([
-            wgit.statusInfo(),
-            wgit.statusFiles()
-          ]);
-          return {
-            branch: w.branch,
-            path: w.path,
-            pinned: pinned.has(w.path),
-            base,
-            status: {
-              modified: status.modified,
-              untracked: status.untracked,
-              ahead: status.ahead,
-              behind: status.behind,
-              files: files.slice(0, MAX_FILES_PER_WORKTREE)
-            }
-          } satisfies WorktreeDTO;
-        } catch {
-          return {
-            branch: w.branch,
-            path: w.path,
-            pinned: pinned.has(w.path),
-            base
-          } satisfies WorktreeDTO;
-        }
-      })
-    );
-    worktrees.sort((a, b) => {
-      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-      return a.branch.localeCompare(b.branch);
-    });
-  } catch {
-    worktrees = [];
-  }
-
-  const sessions: SessionDTO[] = [];
-  for (const w of worktrees) {
-    for (const s of registry.forWorktree(w.path)) {
-      sessions.push({
-        id: s.id,
-        worktreePath: s.worktreePath,
-        branch: s.branch,
-        agentType: s.agentType,
-        label: s.label,
-        state: s.state,
-        createdAt: s.createdAt
-      });
-    }
-  }
-
-  const extraShells: ExtraShellDTO[] = getSettings().extraShells.map(s => ({
-    name: s.name,
-    command: s.command,
-    args: s.args ?? []
-  }));
-
-  return { repoLabel, worktrees, sessions, extraShells };
+  if (repos.length === 1) return repos[0]!;
+  const pick = await vscode.window.showQuickPick(
+    repos.map(r => ({ label: path.basename(r), description: r, root: r })),
+    { placeHolder: 'Pick repository for the new worktree' }
+  );
+  return pick ? pick.root : null;
 }
 
 async function createWorktreeFlow(
+  repoRoot: string,
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
   refresh: () => Promise<void>
 ): Promise<void> {
-  const repoRoot = await ensureRepo(context);
-  if (!repoRoot) return;
-
   const branch = await vscode.window.showInputBox({
     prompt: 'Branch name for the new worktree',
     placeHolder: 'feat/my-feature',
@@ -285,25 +231,17 @@ async function createWorktreeFlow(
 
 async function removeWorktreeFlow(
   worktreePath: string,
+  repoRoot: string,
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
-  registry: SessionRegistry,
   refresh: () => Promise<void>
 ): Promise<void> {
-  const repoRoot = await ensureRepo(context);
-  if (!repoRoot) return;
-
   const list = await new WorktreeManager(repoRoot).list();
   const target = list.find(w => w.path === worktreePath);
   if (!target) {
     void vscode.window.showWarningMessage(`vsWT: worktree not found: ${worktreePath}`);
     return;
   }
-
-  const sessionsHere = registry.forWorktree(target.path);
-  const sessionNote = sessionsHere.length > 0
-    ? ` Will also stop ${sessionsHere.length} active session${sessionsHere.length > 1 ? 's' : ''}.`
-    : '';
 
   let dirtyNote = '';
   try {
@@ -319,17 +257,12 @@ async function removeWorktreeFlow(
   }
 
   const confirm = await vscode.window.showWarningMessage(
-    `Remove worktree '${target.branch}' at ${target.path}?${sessionNote}${dirtyNote}`,
+    `Remove worktree '${target.branch}' at ${target.path}?${dirtyNote}`,
     { modal: true },
     'Remove',
     'Force remove'
   );
   if (!confirm) return;
-
-  for (const s of sessionsHere) registry.stop(s.id);
-  if (sessionsHere.length > 0) {
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
 
   const manager = new WorktreeManager(repoRoot);
   output.show(true);
@@ -367,15 +300,12 @@ async function removeWorktreeFlow(
 
 async function renameWorktreeFlow(
   worktreePath: string,
+  repoRoot: string,
   newBranchInput: string,
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
-  registry: SessionRegistry,
   refresh: () => Promise<void>
 ): Promise<void> {
-  const repoRoot = await ensureRepo(context);
-  if (!repoRoot) return;
-
   const list = await new WorktreeManager(repoRoot).list();
   const target = list.find(w => w.path === worktreePath);
   if (!target) {
@@ -385,18 +315,6 @@ async function renameWorktreeFlow(
 
   const newBranch = newBranchInput.trim();
   if (!newBranch || newBranch === target.branch) return;
-
-  const sessionsHere = registry.forWorktree(target.path);
-  if (sessionsHere.length > 0) {
-    const proceed = await vscode.window.showWarningMessage(
-      `Renaming will close ${sessionsHere.length} active session${sessionsHere.length > 1 ? 's' : ''}. Continue?`,
-      { modal: true },
-      'Continue'
-    );
-    if (!proceed) return;
-    for (const s of sessionsHere) registry.stop(s.id);
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
 
   output.show(true);
   try {
@@ -417,14 +335,11 @@ async function renameWorktreeFlow(
 
 async function finishWorktreeFlow(
   worktreePath: string,
+  repoRoot: string,
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
-  registry: SessionRegistry,
   refresh: () => Promise<void>
 ): Promise<void> {
-  const repoRoot = await ensureRepo(context);
-  if (!repoRoot) return;
-
   const list = await new WorktreeManager(repoRoot).list();
   const target = list.find(w => w.path === worktreePath);
   if (!target) {
@@ -546,12 +461,6 @@ async function finishWorktreeFlow(
           await mainGit.push();
         } catch (err) {
           output.appendLine(`[vsWT] push failed (non-fatal): ${(err as Error).message.split('\n')[0]}`);
-        }
-
-        const sessionsHere = registry.forWorktree(target.path);
-        for (const s of sessionsHere) registry.stop(s.id);
-        if (sessionsHere.length > 0) {
-          await new Promise(resolve => setTimeout(resolve, 500));
         }
 
         progress.report({ message: 'removing worktree…' });
@@ -720,250 +629,74 @@ async function syncWorktreeFlow(
   );
 }
 
-async function startSessionByPath(
-  worktreePath: string,
-  agentType: AgentType,
-  shellName: string | undefined,
-  context: vscode.ExtensionContext,
-  registry: SessionRegistry,
-  refresh: () => Promise<void>
-): Promise<void> {
-  const repoRoot = await ensureRepo(context);
-  if (!repoRoot) return;
-  const list = await new WorktreeManager(repoRoot).list();
-  const target = list.find(w => w.path === worktreePath);
-  if (!target) {
-    void vscode.window.showWarningMessage(`vsWT: worktree not found: ${worktreePath}`);
-    return;
-  }
-  let shellOverride: { name: string; command: string; args?: string[] } | undefined;
-  if (agentType === 'shell' && shellName) {
-    const found = getSettings().extraShells.find(s => s.name === shellName);
-    if (found) {
-      shellOverride = { name: found.name, command: found.command };
-      if (found.args && found.args.length > 0) shellOverride.args = found.args;
-    }
-  }
-  registry.start({ branch: target.branch, path: target.path }, agentType, shellOverride);
-  await refresh();
-}
-
-async function startSessionInteractive(
-  agentType: AgentType,
-  context: vscode.ExtensionContext,
-  registry: SessionRegistry,
-  refresh: () => Promise<void>
-): Promise<void> {
-  const repoRoot = await ensureRepo(context);
-  if (!repoRoot) return;
-  const list = await new WorktreeManager(repoRoot).list();
-  if (list.length === 0) {
-    void vscode.window.showInformationMessage('vsWT: create a worktree first.');
-    return;
-  }
-  const pick = await vscode.window.showQuickPick(
-    list.map(w => ({ label: w.branch, description: w.path, w })),
-    { placeHolder: `Pick worktree to start ${agentType} session in` }
-  );
-  if (!pick) return;
-  registry.start(pick.w, agentType);
-  await refresh();
-}
-
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('vsWT');
-  const registry = new SessionRegistry();
 
-  let host: SidebarHost; // assigned below
-
-  const refreshState = async (): Promise<void> => {
-    if (host) await host.pushState();
+  let treeRefresh: () => void = () => {};
+  const refresh = async (): Promise<void> => {
+    treeRefresh();
   };
 
-  const handleRequest = async (req: RpcRequest): Promise<unknown> => {
-    switch (req.type) {
-      case 'ready':
-        await refreshState();
-        return undefined;
-
-      case 'pickRepo':
-        await pickRepo(context);
-        await refreshState();
-        return undefined;
-
-      case 'createWorktree':
-        await createWorktreeFlow(context, output, refreshState);
-        return undefined;
-
-      case 'removeWorktree':
-        await removeWorktreeFlow(req.path, context, output, registry, refreshState);
-        return undefined;
-
-      case 'renameWorktree':
-        await renameWorktreeFlow(req.path, req.newBranch, context, output, registry, refreshState);
-        return undefined;
-
-      case 'pushWorktree':
-        await syncWorktreeFlow(req.path, 'push', output, refreshState);
-        return undefined;
-
-      case 'pullWorktree':
-        await syncWorktreeFlow(req.path, 'pull', output, refreshState);
-        return undefined;
-
-      case 'fetchWorktree':
-        await syncWorktreeFlow(req.path, 'fetch', output, refreshState);
-        return undefined;
-
-      case 'showFileDiff':
-        await showFileDiffFlow(req.worktreePath, req.relativePath, req.statusCode);
-        return undefined;
-
-      case 'createPR':
-        await createPRFlow(req.path, output, refreshState);
-        return undefined;
-
-      case 'finishWorktree':
-        await finishWorktreeFlow(req.path, context, output, registry, refreshState);
-        return undefined;
-
-      case 'togglePin': {
-        const pinned = getPinnedPaths(context);
-        await setPinned(context, req.path, !pinned.has(req.path));
-        await refreshState();
-        return undefined;
-      }
-
-      case 'startSession':
-        await startSessionByPath(req.worktreePath, req.agentType, req.shellName, context, registry, refreshState);
-        return undefined;
-
-      case 'stopSession':
-        registry.stop(req.sessionId);
-        return undefined;
-
-      case 'showSession':
-        registry.show(req.sessionId);
-        return undefined;
-
-      case 'resumeSession':
-        registry.resume(req.sessionId);
-        return undefined;
-
-      case 'openWorktree':
-        await vscode.commands.executeCommand(
-          'vscode.openFolder',
-          vscode.Uri.file(req.path),
-          { forceNewWindow: req.newWindow }
-        );
-        return undefined;
-
-      case 'openTerminal': {
-        const term = vscode.window.createTerminal({
-          name: `${path.basename(req.path)} · terminal`,
-          cwd: vscode.Uri.file(req.path)
-        });
-        term.show();
-        return undefined;
-      }
-
-      default:
-        throw new Error(`Unknown request: ${(req as { type: string }).type}`);
+  const explorer = registerSessionsExplorer({
+    context,
+    output,
+    getRepos: () => discoverRepos(getRepoScanDepth()),
+    getPinned: () => getPinnedPaths(context),
+    getBases: () => getBases(context),
+    getSessionNames: () => getSessionNames(context),
+    renameSession: async (sessionId, currentName) => {
+      const name = await vscode.window.showInputBox({
+        value: currentName,
+        prompt: 'Session name (leave empty to reset to Claude’s title)'
+      });
+      if (name === undefined) return;
+      await setSessionName(context, sessionId, name.trim());
+      await refresh();
+    },
+    createWorktree: async repoRoot => {
+      const root = repoRoot ?? (await pickRepoForCreate());
+      if (!root) return;
+      await createWorktreeFlow(root, context, output, refresh);
+    },
+    rename: async (worktreePath, repoRoot, currentBranch) => {
+      const newBranch = await vscode.window.showInputBox({
+        value: currentBranch,
+        prompt: 'New branch name for the worktree',
+        validateInput: v => (v.trim() ? null : 'Branch name is required')
+      });
+      if (!newBranch) return;
+      await renameWorktreeFlow(worktreePath, repoRoot, newBranch, context, output, refresh);
+    },
+    remove: (worktreePath, repoRoot) => removeWorktreeFlow(worktreePath, repoRoot, context, output, refresh),
+    togglePin: async worktreePath => {
+      const pinned = getPinnedPaths(context);
+      await setPinned(context, worktreePath, !pinned.has(worktreePath));
+      await refresh();
+    },
+    sync: (worktreePath, op) => syncWorktreeFlow(worktreePath, op, output, refresh),
+    showDiff: (worktreePath, relativePath, statusCode) =>
+      showFileDiffFlow(worktreePath, relativePath, statusCode),
+    createPR: worktreePath => createPRFlow(worktreePath, output, refresh),
+    finish: (worktreePath, repoRoot) => finishWorktreeFlow(worktreePath, repoRoot, context, output, refresh),
+    openWindow: targetPath => {
+      void vscode.commands.executeCommand(
+        'vscode.openFolder',
+        vscode.Uri.file(targetPath),
+        { forceNewWindow: true }
+      );
     }
-  };
+  });
+  treeRefresh = explorer.refresh;
 
-  host = new SidebarHost(
-    context.extensionUri,
-    handleRequest,
-    () => buildState(context, registry)
-  );
-
-  // Probe for installed shells in the background; refresh sidebar once done.
-  void initSettings().then(() => void refreshState());
-
-  // Track when the active terminal belongs to vsWT so the Ctrl+V keybinding
-  // only fires inside our sessions.
-  const updateTerminalContext = (term: vscode.Terminal | undefined): void => {
-    const isOurs = term !== undefined && registry.getSessionForTerminal(term) !== null;
-    void vscode.commands.executeCommand('setContext', 'vswt.terminalActive', isOurs);
-  };
-  updateTerminalContext(vscode.window.activeTerminal);
-
-  const pasteImageHandler = async (): Promise<void> => {
-    const term = vscode.window.activeTerminal;
-    if (!term) return;
-
-    // Fast path: if there's any text on the clipboard, use the standard paste.
-    const text = await vscode.env.clipboard.readText();
-    if (text.length > 0) {
-      await vscode.commands.executeCommand('workbench.action.terminal.paste');
-      return;
-    }
-
-    // No text — try to extract an image (Windows only for now).
-    try {
-      const imgPath = await readClipboardImage();
-      if (imgPath) {
-        term.sendText(formatImageReference(imgPath), false);
-        output.appendLine(`[vsWT] image pasted: ${imgPath}`);
-      } else {
-        // Nothing on the clipboard, or unsupported platform.
-        await vscode.commands.executeCommand('workbench.action.terminal.paste');
-      }
-    } catch (err) {
-      output.appendLine(`[vsWT] paste image failed: ${(err as Error).message}`);
-      await vscode.commands.executeCommand('workbench.action.terminal.paste');
-    }
-  };
-
-  const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  statusBar.command = 'vswt.openSidebar';
-  statusBar.name = 'vsWT';
-
-  const refreshIndicators = (): void => {
-    const count = registry.count();
-    if (count === 0) {
-      host.setBadge(0);
-      statusBar.hide();
-      return;
-    }
-    host.setBadge(count);
-    const word = count === 1 ? 'session' : 'sessions';
-    statusBar.text = `$(sparkle) ${count} ${word}`;
-    statusBar.tooltip = `vsWT: ${count} active ${word}`;
-    statusBar.show();
-  };
+  // Probe for installed shells in the background; refresh the tree once done.
+  void initSettings().then(() => void refresh());
 
   context.subscriptions.push(
     output,
-    statusBar,
-    registry.init(context),
-    registry.onChange(() => {
-      refreshIndicators();
-      void refreshState();
-    }),
-    vscode.workspace.onDidChangeWorkspaceFolders(() => void refreshState()),
-    vscode.window.registerWebviewViewProvider(SidebarHost.viewType, host),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => void refresh()),
     vscode.commands.registerCommand('vswt.openSidebar', () => {
       void vscode.commands.executeCommand('workbench.view.extension.vswt');
-    }),
-    vscode.commands.registerCommand('vswt.refreshWorktrees', () => void refreshState()),
-    vscode.commands.registerCommand('vswt.pickRepo', async () => {
-      await pickRepo(context);
-      await refreshState();
-    }),
-    vscode.commands.registerCommand('vswt.createWorktree', () =>
-      createWorktreeFlow(context, output, refreshState)
-    ),
-    vscode.commands.registerCommand('vswt.startClaudeSession', () =>
-      startSessionInteractive('claude', context, registry, refreshState)
-    ),
-    vscode.commands.registerCommand('vswt.startShellSession', () =>
-      startSessionInteractive('shell', context, registry, refreshState)
-    ),
-    vscode.commands.registerCommand('vswt.pasteImage', pasteImageHandler),
-    vscode.window.onDidChangeActiveTerminal(updateTerminalContext),
-    registry.onChange(() => updateTerminalContext(vscode.window.activeTerminal))
+    })
   );
 }
 
