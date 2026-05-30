@@ -1,7 +1,7 @@
 # Worktree Sessions for Claude Code
 
 **One sidebar tree for your git worktrees and the Claude Code sessions in each.**
-For every worktree of your repo — or every repo in a folder of projects — vsWT
+For every worktree of your repo — or every repo in a folder of projects — it
 lists the Claude Code sessions that ran there, flags which are **still running
 right now**, and resumes any past one in a single click. The same tree drives the
 whole worktree lifecycle: create, inline diff, pull / push / fetch, open a PR, and
@@ -19,7 +19,7 @@ VS Code extension that lives where you already work.
 > rough edges remain. Bug reports and feature requests are very welcome at
 > [github.com/vana123/vswt/issues](https://github.com/vana123/vswt/issues).
 
-## Why vsWT
+## Why this extension
 
 - **Real parallelism, not tab-switching.** A git worktree is a separate
   checkout of the same repo on a different branch — Claude in worktree A
@@ -37,7 +37,7 @@ A single tree: repository → worktrees → the Claude sessions that ran in them
 Worktree actions live in the right-click menu; sessions resume on click.
 
 ```
-vsWT — Worktrees
+Worktree Sessions
 └─ my-project
    ├─ ⎇ main          ~/dev/my-project                ●3 ↑1
    │   ├─ ⊟ Changes (3)
@@ -55,7 +55,7 @@ the top; a worktree with no sessions shows `—`. Worktrees created by
 icon to set them apart from regular ones.
 
 **Open a folder of projects.** If the folder you open isn't itself a git repo,
-vsWT scans its subfolders for repositories and lists each as its own top-level
+it scans its subfolders for repositories and lists each as its own top-level
 node — so a `~/dev` containing many projects shows them all, each expandable into
 its worktrees and sessions. Scan depth is configurable (`vswt.repoScanDepth`,
 default 1); linked worktree folders fold into their main repo, not duplicated.
@@ -74,8 +74,8 @@ default 1); linked worktree folders fold into their main repo, not duplicated.
 ### Claude sessions
 - Lists the **existing** Claude sessions found in `~/.claude/projects`, grouped
   under the worktree they ran in — matched by the working directory recorded in
-  each transcript, so sessions started *outside* vsWT (a plain terminal, another
-  tool) show up too.
+  each transcript, so sessions started *outside* this extension (a plain
+  terminal, another tool) show up too.
 - **Click to resume** — opens a terminal in the worktree and runs
   `claude --resume <id>`.
 - **Rename** a session to a custom label — stored as an overlay in the
@@ -92,7 +92,7 @@ default 1); linked worktree folders fold into their main repo, not duplicated.
 - **Running vs historical** — a session whose process is actually alive gets a
   green ● and sorts to the top; this reads Claude's live-session registry
   (`~/.claude/sessions/<pid>.json`, created on start and removed on exit), so it
-  reflects real running sessions — even ones started outside vsWT — and clears
+  reflects real running sessions — even ones started elsewhere — and clears
   the moment you exit, regardless of how long it's been idle. Everything else is
   historical, filtered to the last `vswt.sessions.maxAgeDays` days and capped at
   `vswt.sessions.maxPerWorktree` per worktree, with the rest under a
@@ -104,8 +104,8 @@ default 1); linked worktree folders fold into their main repo, not duplicated.
 - **New Claude / New Shell / Term here** — open a terminal in the worktree.
   The shell picker offers Git Bash / CMD / PowerShell on Windows, or
   Zsh / Fish on Linux/macOS, detected at activation time.
-- On Windows, `Ctrl+V` in a vsWT-opened terminal pastes a clipboard image as a
-  PNG `@<path>` reference for Claude.
+- On Windows, `Ctrl+V` in a terminal opened from the tree pastes a clipboard
+  image as a PNG `@<path>` reference for Claude.
 
 ### Git workflow
 - **Status badges** on each worktree row: `●N` dirty count, `↑N` ahead, `↓N`
@@ -119,7 +119,7 @@ default 1); linked worktree folders fold into their main repo, not duplicated.
 - **Finish** — full lifecycle close-out: push feature → checkout target → pull
   → merge (`--no-ff` or `--squash`) → push → remove worktree → delete branch.
   Pre-flight check refuses to run if main repo has uncommitted changes.
-- **Base branch** tracking — vsWT remembers what you forked from and pre-selects
+- **Base branch** tracking — it remembers what you forked from and pre-selects
   it in the Finish merge picker.
 
 ## Requirements

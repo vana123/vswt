@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to vsWT will be documented in this file.
+All notable changes to Worktree Sessions for Claude Code will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   are marked with a green ● and sorted to the top, read from Claude's
   live-session registry (`~/.claude/sessions/<pid>.json`, created on start /
   removed on exit) — so it tracks real running sessions (including ones started
-  outside vsWT) and clears the moment you exit, no matter how long it sat idle.
+  elsewhere) and clears the moment you exit, no matter how long it sat idle.
   A watcher on the registry flips the dot promptly.
 - **Trim the session pile.** Historical sessions are filtered to the last
   `vswt.sessions.maxAgeDays` days (default 30) and capped per worktree at
@@ -22,7 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Rebranded.** Descriptive Marketplace title — **Worktree Sessions for Claude
   Code** — plus rewritten description/README, and an original logo (a branching
   worktree with a green "running" node) replacing the Anthropic Claude symbol.
-  vsWT is an independent tool, not an official Anthropic extension. The extension
+  It is an independent tool, not an official Anthropic extension. The extension
   id (`vana123.vswt`) is unchanged.
 
 ## [0.1.0] — 2026-05-30

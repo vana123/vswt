@@ -52,7 +52,7 @@
       "activitybar": [
         {
           "id": "vswt",
-          "title": "vsWT",
+          "title": "Worktree Sessions",
           "icon": "media/icon.svg"
         }
       ]
@@ -64,7 +64,7 @@
           "id": "vswt.sessions",
           "name": "Worktrees",
           "icon": "media/icon.svg",
-          "contextualTitle": "vsWT"
+          "contextualTitle": "Worktree Sessions"
         }
       ]
     },
@@ -72,154 +72,154 @@
       {
         "command": "vswt.openSidebar",
         "title": "Open Sidebar",
-        "category": "vsWT"
+        "category": "Worktree Sessions"
       },
       {
         "command": "vswt.createWorktree",
         "title": "New Worktree…",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(add)"
       },
       {
         "command": "vswt.repo.newWorktree",
         "title": "New Worktree…",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(add)"
       },
       {
         "command": "vswt.repo.newClaudeWorktree",
         "title": "New Claude Session (new worktree)",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(sparkle)"
       },
       {
         "command": "vswt.repo.openWindow",
         "title": "Open in New Window",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(empty-window)"
       },
       {
         "command": "vswt.pasteImage",
         "title": "Paste Image to Active Session",
-        "category": "vsWT"
+        "category": "Worktree Sessions"
       },
       {
         "command": "vswt.sessions.refresh",
         "title": "Refresh",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(refresh)"
       },
       {
         "command": "vswt.sessions.toggleUnmatched",
         "title": "Toggle Sessions Outside This Repo",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(filter)"
       },
       {
         "command": "vswt.sessions.resume",
         "title": "Resume in Terminal",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(debug-start)"
       },
       {
         "command": "vswt.sessions.rename",
         "title": "Rename Session…",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(edit)"
       },
       {
         "command": "vswt.sessions.revealTranscript",
         "title": "Reveal Transcript",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(go-to-file)"
       },
       {
         "command": "vswt.sessions.copySessionId",
         "title": "Copy Session ID",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(copy)"
       },
       {
         "command": "vswt.wt.newClaude",
         "title": "New Claude Session Here",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(sparkle)"
       },
       {
         "command": "vswt.wt.newShell",
         "title": "New Shell Session Here",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(terminal)"
       },
       {
         "command": "vswt.wt.term",
         "title": "Open Terminal Here",
-        "category": "vsWT"
+        "category": "Worktree Sessions"
       },
       {
         "command": "vswt.wt.pull",
         "title": "Pull",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(arrow-down)"
       },
       {
         "command": "vswt.wt.push",
         "title": "Push",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(arrow-up)"
       },
       {
         "command": "vswt.wt.fetch",
         "title": "Fetch",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(sync)"
       },
       {
         "command": "vswt.wt.openWindow",
         "title": "Open in New Window",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(empty-window)"
       },
       {
         "command": "vswt.wt.pr",
         "title": "Create PR",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(git-pull-request)"
       },
       {
         "command": "vswt.wt.finish",
         "title": "Finish (merge & remove)",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(check)"
       },
       {
         "command": "vswt.wt.rename",
         "title": "Rename Worktree…",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(edit)"
       },
       {
         "command": "vswt.wt.pin",
         "title": "Pin to Top",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(pin)"
       },
       {
         "command": "vswt.wt.unpin",
         "title": "Unpin",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(pinned)"
       },
       {
         "command": "vswt.wt.remove",
         "title": "Remove Worktree",
-        "category": "vsWT",
+        "category": "Worktree Sessions",
         "icon": "$(trash)"
       },
       {
         "command": "vswt.wt.showDiff",
         "title": "Open Diff",
-        "category": "vsWT"
+        "category": "Worktree Sessions"
       }
     ],
     "keybindings": [
@@ -466,7 +466,7 @@
       ]
     },
     "configuration": {
-      "title": "vsWT",
+      "title": "Worktree Sessions",
       "properties": {
         "vswt.repoScanDepth": {
           "type": "number",
