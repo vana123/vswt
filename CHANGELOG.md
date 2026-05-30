@@ -4,6 +4,16 @@ All notable changes to Worktree Sessions for Claude Code will be documented in t
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] — 2026-05-31
+
+### Changed
+- **Rebranded.** Descriptive Marketplace title — **Worktree Sessions for Claude
+  Code** — an original logo (a branching worktree with a green "running" node)
+  replacing the Anthropic Claude symbol, and the old "vsWT" name removed from the
+  UI (panel and settings titles, command palette) and docs. An independent tool,
+  not an official Anthropic extension; the extension id (`vana123.vswt`) is
+  unchanged.
+
 ## [0.2.0] — 2026-05-31
 
 ### Added
@@ -17,13 +27,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `vswt.sessions.maxAgeDays` days (default 30) and capped per worktree at
   `vswt.sessions.maxPerWorktree` (default 15), with the rest under a
   *Show N older…* node.
-
-### Changed
-- **Rebranded.** Descriptive Marketplace title — **Worktree Sessions for Claude
-  Code** — plus rewritten description/README, and an original logo (a branching
-  worktree with a green "running" node) replacing the Anthropic Claude symbol.
-  It is an independent tool, not an official Anthropic extension. The extension
-  id (`vana123.vswt`) is unchanged.
 
 ## [0.1.0] — 2026-05-30
 
