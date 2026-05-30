@@ -27,10 +27,19 @@ export interface SessionsExplorerDeps {
 const SECTION = 'vswt.sessions';
 const DEBOUNCE_MS = 500;
 
+function nonNegative(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && value >= 0 ? Math.floor(value) : fallback;
+}
+
 function getConfig(): SessionsConfig {
   const cfg = vscode.workspace.getConfiguration(SECTION);
   const sessionLabel = cfg.get<string>('label') === 'firstMessage' ? 'firstMessage' : 'name';
-  return { sessionLabel, showUnmatched: cfg.get<boolean>('showUnmatched') ?? false };
+  return {
+    sessionLabel,
+    showUnmatched: cfg.get<boolean>('showUnmatched') ?? false,
+    maxAgeDays: nonNegative(cfg.get<number>('maxAgeDays'), 30),
+    maxPerWorktree: nonNegative(cfg.get<number>('maxPerWorktree'), 15)
+  };
 }
 
 function getProjectsDir(): string {
@@ -52,6 +61,13 @@ function getClaudePath(): string {
 export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh: () => void } {
   const { context, output } = deps;
 
+  // Track terminals we open so the Ctrl+V paste-image gate (vswt.terminalActive)
+  // only fires inside terminals this extension created.
+  const ownTerminals = new Set<vscode.Terminal>();
+  // Resume terminals keyed by session id, so clicking a session reuses its
+  // terminal instead of spawning a duplicate each time.
+  const sessionTerminals = new Map<string, vscode.Terminal>();
+
   const scanner = new SessionScanner(getProjectsDir());
   const provider = new SessionsTreeProvider(
     scanner,
@@ -66,12 +82,6 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     showCollapseAll: true
   });
 
-  // Track terminals we open so the Ctrl+V paste-image gate (vswt.terminalActive)
-  // only fires inside terminals this extension created.
-  const ownTerminals = new Set<vscode.Terminal>();
-  // Resume terminals keyed by session id, so clicking a session reuses its
-  // terminal instead of spawning a duplicate each time.
-  const sessionTerminals = new Map<string, vscode.Terminal>();
   const updateTerminalContext = (term: vscode.Terminal | undefined): void => {
     void vscode.commands.executeCommand(
       'setContext',
@@ -148,9 +158,12 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
   };
 
   let watcher: vscode.FileSystemWatcher | undefined;
+  let registryWatcher: vscode.FileSystemWatcher | undefined;
   const setupWatcher = (): void => {
     watcher?.dispose();
+    registryWatcher?.dispose();
     try {
+      // Transcripts → reflect new/changed sessions.
       watcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(vscode.Uri.file(scanner.resolveProjectsDir()), '**/*.jsonl')
       );
@@ -158,11 +171,34 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
       watcher.onDidChange(scheduleRefresh);
       watcher.onDidDelete(scheduleRefresh);
       context.subscriptions.push(watcher);
+
+      // Live-session registry → a file appears on start and is removed on exit,
+      // so create/delete here flips the "running" dot promptly.
+      registryWatcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(vscode.Uri.file(scanner.resolveSessionsDir()), '*.json')
+      );
+      registryWatcher.onDidCreate(scheduleRefresh);
+      registryWatcher.onDidDelete(scheduleRefresh);
+      context.subscriptions.push(registryWatcher);
     } catch (err) {
       output.appendLine(`[vsWT] sessions watcher failed: ${(err as Error).message}`);
     }
   };
   setupWatcher();
+
+  // While the view is visible, re-evaluate periodically to clear the "running"
+  // dot if a session's process died without removing its registry file (crash).
+  let activeTimer: ReturnType<typeof setInterval> | undefined;
+  const stopActiveTimer = (): void => {
+    if (activeTimer) {
+      clearInterval(activeTimer);
+      activeTimer = undefined;
+    }
+  };
+  const startActiveTimer = (): void => {
+    if (!activeTimer) activeTimer = setInterval(() => provider.refresh(), 60_000);
+  };
+  if (treeView.visible) startActiveTimer();
 
   const configSub = vscode.workspace.onDidChangeConfiguration(e => {
     if (e.affectsConfiguration(`${SECTION}.projectsDir`)) {
@@ -194,8 +230,14 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     treeView,
     configSub,
     treeView.onDidChangeVisibility(e => {
-      if (e.visible) provider.refresh();
+      if (e.visible) {
+        provider.refresh();
+        startActiveTimer();
+      } else {
+        stopActiveTimer();
+      }
     }),
+    new vscode.Disposable(stopActiveTimer),
     vscode.window.onDidChangeActiveTerminal(updateTerminalContext),
     vscode.window.onDidCloseTerminal(t => {
       ownTerminals.delete(t);

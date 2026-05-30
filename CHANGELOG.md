@@ -4,6 +4,24 @@ All notable changes to vsWT will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] — 2026-05-31
+
+### Added
+- **Running vs historical sessions.** Sessions whose process is actually alive
+  are marked with a green ● and sorted to the top, read from Claude's
+  live-session registry (`~/.claude/sessions/<pid>.json`, created on start /
+  removed on exit) — so it tracks real running sessions (including ones started
+  outside vsWT) and clears the moment you exit, no matter how long it sat idle.
+  A watcher on the registry flips the dot promptly.
+- **Trim the session pile.** Historical sessions are filtered to the last
+  `vswt.sessions.maxAgeDays` days (default 30) and capped per worktree at
+  `vswt.sessions.maxPerWorktree` (default 15), with the rest under a
+  *Show N older…* node.
+
+### Changed
+- Marketplace title, description and README rewritten to describe the worktree
+  and Claude-session explorer the extension actually is.
+
 ## [0.1.0] — 2026-05-30
 
 ### Changed

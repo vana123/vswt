@@ -1,8 +1,8 @@
 {
   "name": "vswt",
-  "displayName": "vsWT — Worktree Orchestrator",
-  "description": "Orchestrate parallel Claude Code sessions in VS Code — a worktree tree with built-in create / diff / pull / push / PR / finish flow and one-click resume of existing Claude sessions.",
-  "version": "0.1.0",
+  "displayName": "vsWT — Worktrees & Claude Sessions",
+  "description": "A sidebar tree of your git worktrees and the Claude Code sessions in each — see which are running, resume past ones in a click, and create / diff / pull / push / PR / finish worktrees, across one repo or a whole folder of projects.",
+  "version": "0.2.0",
   "publisher": "vana123",
   "license": "MIT",
   "engines": {
@@ -25,7 +25,10 @@
     "parallel",
     "orchestrator",
     "sidebar",
-    "terminal"
+    "terminal",
+    "sessions",
+    "resume",
+    "scm"
   ],
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -512,6 +515,18 @@
           "type": "boolean",
           "default": false,
           "description": "Show Claude sessions whose working directory is not a worktree of the current repository, grouped under an \"Other\" node."
+        },
+        "vswt.sessions.maxAgeDays": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "description": "Hide historical sessions with no activity in this many days. Active sessions are always shown. 0 = no age limit."
+        },
+        "vswt.sessions.maxPerWorktree": {
+          "type": "number",
+          "default": 15,
+          "minimum": 0,
+          "description": "Maximum historical sessions shown per worktree before they collapse under a \"Show N older…\" node. 0 = unlimited."
         },
         "vswt.sessions.projectsDir": {
           "type": "string",

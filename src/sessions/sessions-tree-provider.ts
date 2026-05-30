@@ -8,6 +8,10 @@ import { escapeMarkdown, formatRelativeTime, shortenHomePath, truncate } from '.
 export interface SessionsConfig {
   sessionLabel: 'name' | 'firstMessage';
   showUnmatched: boolean;
+  /** Hide historical sessions with no activity in this many days. 0 = no age limit. */
+  maxAgeDays: number;
+  /** Cap historical sessions shown per worktree before an overflow node. 0 = unlimited. */
+  maxPerWorktree: number;
 }
 
 interface WorktreeGroup {
@@ -21,6 +25,10 @@ interface WorktreeGroup {
   status: WorktreeStatus | null;
   files: FileChange[];
   sessions: ClaudeSession[];
+  /** Recently-active sessions (always shown). */
+  active: ClaudeSession[];
+  /** Older sessions, after the age filter (capped at render time). */
+  historical: ClaudeSession[];
 }
 
 interface RepoModel {
@@ -32,6 +40,8 @@ interface RepoModel {
 interface TreeModel {
   repos: RepoModel[];
   unmatched: ClaudeSession[];
+  /** Session ids currently running (Claude's live-process registry). */
+  running: Set<string>;
 }
 
 export type SessionsNode =
@@ -40,7 +50,8 @@ export type SessionsNode =
   | { kind: 'worktree'; group: WorktreeGroup }
   | { kind: 'changes'; worktreePath: string; count: number }
   | { kind: 'file'; worktreePath: string; file: FileChange }
-  | { kind: 'session'; session: ClaudeSession; cwd: string | null; branch: string | null }
+  | { kind: 'session'; session: ClaudeSession; cwd: string | null; branch: string | null; active: boolean }
+  | { kind: 'sessionsMore'; worktreePath: string; count: number }
   | { kind: 'unmatched'; count: number };
 
 const { Collapsed, Expanded, None } = vscode.TreeItemCollapsibleState;
@@ -92,13 +103,34 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     }
 
     if (element.kind === 'worktree') {
-      const { info, files, sessions } = element.group;
+      const { info, files, active, historical } = element.group;
+      const cap = this.getConfig().maxPerWorktree;
       const nodes: SessionsNode[] = [];
       if (files.length > 0) nodes.push({ kind: 'changes', worktreePath: info.path, count: files.length });
-      for (const session of sessions) {
-        nodes.push({ kind: 'session', session, cwd: info.path, branch: info.branch });
+      for (const session of active) {
+        nodes.push({ kind: 'session', session, cwd: info.path, branch: info.branch, active: true });
+      }
+      const shown = cap > 0 ? historical.slice(0, cap) : historical;
+      for (const session of shown) {
+        nodes.push({ kind: 'session', session, cwd: info.path, branch: info.branch, active: false });
+      }
+      if (cap > 0 && historical.length > cap) {
+        nodes.push({ kind: 'sessionsMore', worktreePath: info.path, count: historical.length - cap });
       }
       return nodes;
+    }
+
+    if (element.kind === 'sessionsMore') {
+      const group = model.repos.flatMap(r => r.groups).find(g => g.info.path === element.worktreePath);
+      if (!group) return [];
+      const cap = this.getConfig().maxPerWorktree;
+      return group.historical.slice(cap).map(session => ({
+        kind: 'session',
+        session,
+        cwd: group.info.path,
+        branch: group.info.branch,
+        active: false
+      }));
     }
 
     if (element.kind === 'changes') {
@@ -112,7 +144,8 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
         kind: 'session',
         session,
         cwd: session.cwd,
-        branch: session.gitBranch
+        branch: session.gitBranch,
+        active: model.running.has(session.id)
       }));
     }
 
@@ -147,7 +180,13 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
       case 'file':
         return this.fileItem(node);
       case 'session':
-        return this.sessionItem(node.session, node.branch);
+        return this.sessionItem(node.session, node.branch, node.active);
+      case 'sessionsMore': {
+        const item = new vscode.TreeItem(`Show ${node.count} older…`, Collapsed);
+        item.iconPath = new vscode.ThemeIcon('history');
+        item.contextValue = 'vswtSessionsMore';
+        return item;
+      }
       case 'unmatched': {
         const item = new vscode.TreeItem('Other · outside these repos', Collapsed);
         item.iconPath = new vscode.ThemeIcon('question');
@@ -160,10 +199,10 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
   }
 
   private worktreeItem(group: WorktreeGroup): vscode.TreeItem {
-    const { info, isCurrent, isClaude, pinned, base, status, files, sessions } = group;
+    const { info, isCurrent, isClaude, pinned, base, status, files, sessions, active, historical } = group;
     const branch = info.branch ?? '(detached)';
-    const hasChildren = files.length > 0 || sessions.length > 0;
-    const state = hasChildren ? (isCurrent ? Expanded : Collapsed) : None;
+    const hasChildren = files.length > 0 || active.length > 0 || historical.length > 0;
+    const state = hasChildren ? (isCurrent || active.length > 0 ? Expanded : Collapsed) : None;
 
     const item = new vscode.TreeItem(branch, state);
     item.id = 'wt:' + info.path;
@@ -182,6 +221,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     item.contextValue = pinned ? 'vswtSessionsWorktree.pinned' : 'vswtSessionsWorktree.unpinned';
 
     const flags: string[] = [];
+    if (active.length > 0) flags.push(`${active.length} running`);
     if (isClaude) flags.push('claude-created');
     if (isCurrent) flags.push('current');
     if (pinned) flags.push('pinned');
@@ -201,7 +241,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
       );
     }
     if (flags.length) md.appendMarkdown(`- flags: ${flags.join(', ')}\n`);
-    md.appendMarkdown(`- sessions: ${sessions.length}\n`);
+    md.appendMarkdown(`- sessions: ${sessions.length} total · ${active.length} running\n`);
     item.tooltip = md;
     return item;
   }
@@ -220,7 +260,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     return item;
   }
 
-  private sessionItem(session: ClaudeSession, branch: string | null): vscode.TreeItem {
+  private sessionItem(session: ClaudeSession, branch: string | null, active: boolean): vscode.TreeItem {
     const cfg = this.getConfig();
     const custom = this.getSessionNames()[session.id];
     const primary =
@@ -230,13 +270,16 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
         : session.title ?? session.firstMessage);
     const item = new vscode.TreeItem(truncate(primary ?? session.id, 60), None);
     item.id = 'sess:' + session.filePath;
-    item.description = formatRelativeTime(session.lastActivity);
-    item.iconPath = new vscode.ThemeIcon('comment-discussion');
+    const rel = formatRelativeTime(session.lastActivity);
+    item.description = active ? `running · ${rel}` : rel;
+    item.iconPath = active
+      ? new vscode.ThemeIcon('circle-filled', new vscode.ThemeColor('charts.green'))
+      : new vscode.ThemeIcon('comment-discussion');
     item.contextValue = 'vswtSessionsSession';
     item.command = {
       command: 'vswt.sessions.resume',
       title: 'Resume in Terminal',
-      arguments: [{ kind: 'session', session, cwd: session.cwd, branch } satisfies SessionsNode]
+      arguments: [{ kind: 'session', session, cwd: session.cwd, branch, active } satisfies SessionsNode]
     };
 
     const md = new vscode.MarkdownString();
@@ -260,7 +303,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
 
   private async build(): Promise<TreeModel> {
     const repoRoots = await this.getRepos();
-    if (repoRoots.length === 0) return { repos: [], unmatched: [] };
+    if (repoRoots.length === 0) return { repos: [], unmatched: [], running: new Set() };
 
     const folderKeys = new Set<string>();
     for (const f of vscode.workspace.workspaceFolders ?? []) {
@@ -294,7 +337,9 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
           base: bases[info.path] ?? null,
           status: null,
           files: [],
-          sessions: []
+          sessions: [],
+          active: [],
+          historical: []
         };
         groups.push(group);
         keyToGroup.set(plainKey, group);
@@ -329,11 +374,23 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
       else unmatched.push(session);
     }
 
-    for (const group of allGroups) group.sessions.sort((a, b) => b.lastActivity - a.lastActivity);
+    // Split each worktree's sessions into running (Claude's live-process registry)
+    // and age-filtered historical, most-recent first.
+    const cfg = this.getConfig();
+    const running = await this.scanner.runningSessionIds();
+    const now = Date.now();
+    const ageCutoff = cfg.maxAgeDays > 0 ? now - cfg.maxAgeDays * 86_400_000 : 0;
+    for (const group of allGroups) {
+      group.sessions.sort((a, b) => b.lastActivity - a.lastActivity);
+      group.active = group.sessions.filter(s => running.has(s.id));
+      group.historical = group.sessions.filter(
+        s => !running.has(s.id) && s.lastActivity >= ageCutoff
+      );
+    }
     unmatched.sort((a, b) => b.lastActivity - a.lastActivity);
     repos.sort((a, b) => a.label.localeCompare(b.label));
 
-    return { repos, unmatched };
+    return { repos, unmatched, running };
   }
 
   private async match(

@@ -49,6 +49,43 @@ export class SessionScanner {
     return path.resolve(o);
   }
 
+  /** Claude's live-session registry dir — sibling of the projects dir. */
+  resolveSessionsDir(): string {
+    return path.join(path.dirname(this.resolveProjectsDir()), 'sessions');
+  }
+
+  /**
+   * Session ids that are currently running, per Claude's `<pid>.json` registry
+   * (one file per live process, removed on exit). Stale files from crashed
+   * processes are filtered by checking the pid is actually alive.
+   */
+  async runningSessionIds(): Promise<Set<string>> {
+    const dir = this.resolveSessionsDir();
+    const ids = new Set<string>();
+    let files: string[];
+    try {
+      files = (await fs.readdir(dir)).filter(f => f.endsWith('.json'));
+    } catch {
+      return ids;
+    }
+    await Promise.all(
+      files.map(async f => {
+        try {
+          const o = JSON.parse(await fs.readFile(path.join(dir, f), 'utf8')) as {
+            pid?: unknown;
+            sessionId?: unknown;
+          };
+          const pid = typeof o.pid === 'number' ? o.pid : null;
+          const sid = typeof o.sessionId === 'string' ? o.sessionId : null;
+          if (sid && pid !== null && isPidAlive(pid)) ids.add(sid);
+        } catch {
+          // Unreadable/!json registry file — skip.
+        }
+      })
+    );
+    return ids;
+  }
+
   async scan(): Promise<ClaudeSession[]> {
     const root = this.resolveProjectsDir();
     let projectDirs: string[];
@@ -119,6 +156,16 @@ export class SessionScanner {
     const session = parseSession(text, filePath, path.basename(filePath, '.jsonl'), mtimeMs);
     this.cache.set(filePath, { mtimeMs, session });
     return session;
+  }
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // ESRCH = no such process; EPERM = exists but not ours to signal (still alive).
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
 

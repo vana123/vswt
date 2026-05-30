@@ -1,11 +1,15 @@
-# vsWT — Worktree Orchestrator
+# vsWT — Worktrees & Claude Sessions
 
-**Run many Claude Code sessions in parallel without losing your mind.**
-vsWT turns the VS Code sidebar into a control panel where every branch you're
-working on lives in its own git worktree, with its own Claude (or Shell)
-session — so you can spin up a feature, leave it running, jump to a hotfix,
-review a third branch, and switch back with one click without disturbing any
-of the other terminals or repo state.
+**One sidebar tree for your git worktrees and the Claude Code sessions in each.**
+For every worktree of your repo — or every repo in a folder of projects — vsWT
+lists the Claude Code sessions that ran there, flags which are **still running
+right now**, and resumes any past one in a single click. The same tree drives the
+whole worktree lifecycle: create, inline diff, pull / push / fetch, open a PR, and
+finish (merge → remove worktree → delete branch).
+
+If you juggle several Claude Code sessions across branches, this is the one place
+to see what's running where and pick any of it back up — without `git stash` or
+losing track of which terminal was which.
 
 Cross-platform (Windows / macOS / Linux). Inspired by
 [Scape](https://news.ycombinator.com/item?id=47257712), reimagined as a native
@@ -85,6 +89,14 @@ default 1); linked worktree folders fold into their main repo, not duplicated.
   spawning a duplicate.
 - Sessions outside the current repo can be shown under an optional *Other* node
   (`vswt.sessions.showUnmatched`).
+- **Running vs historical** — a session whose process is actually alive gets a
+  green ● and sorts to the top; this reads Claude's live-session registry
+  (`~/.claude/sessions/<pid>.json`, created on start and removed on exit), so it
+  reflects real running sessions — even ones started outside vsWT — and clears
+  the moment you exit, regardless of how long it's been idle. Everything else is
+  historical, filtered to the last `vswt.sessions.maxAgeDays` days and capped at
+  `vswt.sessions.maxPerWorktree` per worktree, with the rest under a
+  *Show N older…* node.
 - **Live refresh** — a file watcher on the projects directory updates the tree
   within ~1s as sessions are created or change.
 
@@ -131,6 +143,8 @@ default 1); linked worktree folders fold into their main repo, not duplicated.
 | `vswt.claude.path` | `"claude"` | Path to the Claude Code CLI. |
 | `vswt.extraShells` | `null` | Extra shell options. `null` = platform defaults; `[]` = none. |
 | `vswt.sessions.showUnmatched` | `false` | Show sessions outside the current repo under an *Other* node. |
+| `vswt.sessions.maxAgeDays` | `30` | Hide historical sessions with no activity in this many days. `0` = no limit. |
+| `vswt.sessions.maxPerWorktree` | `15` | Max historical sessions per worktree before a *Show N older…* node. `0` = unlimited. |
 | `vswt.sessions.projectsDir` | `""` | Claude transcripts dir. Empty = `~/.claude/projects`. Supports `~`. |
 | `vswt.sessions.resumeCommand` | `""` | Resume command; session id is appended. Empty = `<claude.path> --resume`. |
 | `vswt.sessions.label` | `"name"` | Session label source: `name` (AI title) or `firstMessage`. |
