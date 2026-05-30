@@ -19,8 +19,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   *Show N older…* node.
 
 ### Changed
-- Marketplace title, description and README rewritten to describe the worktree
-  and Claude-session explorer the extension actually is.
+- **Rebranded.** Descriptive Marketplace title — **Worktree Sessions for Claude
+  Code** — plus rewritten description/README, and an original logo (a branching
+  worktree with a green "running" node) replacing the Anthropic Claude symbol.
+  vsWT is an independent tool, not an official Anthropic extension. The extension
+  id (`vana123.vswt`) is unchanged.
 
 ## [0.1.0] — 2026-05-30
 

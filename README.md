@@ -1,4 +1,4 @@
-# vsWT — Worktrees & Claude Sessions
+# Worktree Sessions for Claude Code
 
 **One sidebar tree for your git worktrees and the Claude Code sessions in each.**
 For every worktree of your repo — or every repo in a folder of projects — vsWT
@@ -153,4 +153,5 @@ default 1); linked worktree folders fold into their main repo, not duplicated.
 
 MIT — see [LICENSE](LICENSE).
 
-Claude logo (CC0) from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Claude_AI_symbol.svg).
+Not affiliated with Anthropic. "Claude" and "Claude Code" are trademarks of
+Anthropic; this is an independent tool that works with the Claude Code CLI.
