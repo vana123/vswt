@@ -42,12 +42,9 @@ const MAX_SCAN_BYTES = 256 * 1024;
 const TAIL_SCAN_BYTES = 32 * 1024;
 
 export interface SessionTail {
-  /** Session id read from the last parseable record (falls back to file name). */
   sessionId: string | null;
   /** `stop_reason` of the last assistant message, if present. */
   stopReason: string | null;
-  /** `type` of the last record (`user` / `assistant` / `tool_result` / …). */
-  lastType: string | null;
 }
 
 export class SessionScanner {
@@ -244,8 +241,6 @@ export class SessionScanner {
     if (lines.length > 1) lines.shift();
     let sessionId: string | null = null;
     let stopReason: string | null = null;
-    let lastType: string | null = null;
-    // Walk bottom-up: the most recent records carry the freshest state.
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i]?.trim();
       if (!line) continue;
@@ -258,7 +253,6 @@ export class SessionScanner {
         continue;
       }
       if (!sessionId) sessionId = asString(o['sessionId']);
-      if (!lastType) lastType = asString(o['type']);
       if (stopReason === null && o['type'] === 'assistant') {
         const msg = o['message'];
         if (msg && typeof msg === 'object') {
@@ -270,7 +264,7 @@ export class SessionScanner {
         }
       }
     }
-    return { sessionId, stopReason, lastType };
+    return { sessionId, stopReason };
   }
 
   private async readSession(filePath: string): Promise<ClaudeSession | null> {

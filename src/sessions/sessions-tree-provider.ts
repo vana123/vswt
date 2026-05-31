@@ -96,7 +96,6 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
   ) {}
 
   refresh(): void {
-    // The scanner re-reads only files whose mtime changed; no full cache clear here.
     this.modelPromise = null;
     this._onDidChangeTreeData.fire(undefined);
   }
@@ -137,14 +136,13 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
         nodes.push({ kind: 'commitsGroup', worktreePath: info.path, direction: 'behind', count: status.behind });
       }
       for (const t of this.getTerminals(info.path)) {
-        const node: Extract<SessionsNode, { kind: 'terminal' }> = {
+        nodes.push({
           kind: 'terminal',
           worktreePath: info.path,
           terminal: t.terminal,
-          label: t.label
-        };
-        if (t.icon) node.icon = t.icon;
-        nodes.push(node);
+          label: t.label,
+          ...(t.icon ? { icon: t.icon } : {})
+        });
       }
       for (const session of bookmarked) {
         nodes.push({
@@ -555,9 +553,6 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
       else unmatched.push(session);
     }
 
-    // Split each worktree's sessions into bookmarked (always shown, ignores
-    // age/cap filters), running (live-process registry), and age-filtered
-    // historical — most-recent first.
     const cfg = this.getConfig();
     const running = await this.scanner.runningSessionIds();
     const bookmarks = this.getBookmarks();

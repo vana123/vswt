@@ -30,7 +30,6 @@ export class PRStatusCache {
   private readonly entries = new Map<string, CacheEntry>();
   private ghMissing = false;
 
-  /** Synchronous read; returns `undefined` if nothing is known yet. */
   get(worktreePath: string, onUpdated: () => void): PRStatusInfo | null | undefined {
     if (this.ghMissing) return null;
     const entry = this.entries.get(worktreePath);
@@ -71,11 +70,8 @@ export class PRStatusCache {
         checks: summarizeChecks(parsed.statusCheckRollup ?? [])
       };
     } catch (err) {
-      // ENOENT means `gh` is not installed; cache that and stop trying.
-      const msg = (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'enoent' : '';
-      if (msg === 'enoent') this.ghMissing = true;
-      // For any other error (no PR on this branch, not a GitHub repo,
-      // unauthenticated, no upstream) we just keep status = null.
+      // ENOENT = `gh` is not installed; cache that and stop trying.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') this.ghMissing = true;
     }
     this.entries.set(worktreePath, { status, fetchedAt: Date.now() });
     onUpdated();

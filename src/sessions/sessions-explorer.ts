@@ -69,14 +69,12 @@ function getClaudePath(): string {
 export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh: () => void } {
   const { context, output } = deps;
 
-  // Track terminals we open so the Ctrl+V paste-image gate (vswt.terminalActive)
-  // only fires inside terminals this extension created.
+  // Gates the Ctrl+V paste-image binding (vswt.terminalActive) so it only
+  // fires inside terminals this extension created.
   const ownTerminals = new Set<vscode.Terminal>();
-  // Resume terminals keyed by session id, so clicking a session reuses its
-  // terminal instead of spawning a duplicate each time.
   const sessionTerminals = new Map<string, vscode.Terminal>();
-  // Worktree-attached terminals shown as tree leaves under their worktree.
-  // Resume terminals are NOT here — they already appear as the session node.
+  // Tree-leaf terminals attached to a worktree. Resume terminals are NOT here
+  // — they already appear under the session node.
   const ownTerminalInfo = new Map<vscode.Terminal, { worktreePath: string; label: string; icon?: string }>();
 
   const getTerminals = (worktreePath: string): TerminalRef[] => {
@@ -84,9 +82,7 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     for (const [term, info] of ownTerminalInfo) {
       if (info.worktreePath !== worktreePath) continue;
       if (term.exitStatus !== undefined) continue;
-      const ref: TerminalRef = { terminal: term, label: info.label };
-      if (info.icon) ref.icon = info.icon;
-      out.push(ref);
+      out.push({ terminal: term, label: info.label, ...(info.icon ? { icon: info.icon } : {}) });
     }
     return out;
   };
@@ -136,12 +132,8 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     if (opts.send) term.sendText(opts.send, true);
     updateTerminalContext(term);
     if (opts.attach) {
-      const info: { worktreePath: string; label: string; icon?: string } = {
-        worktreePath: opts.attach.worktreePath,
-        label: opts.attach.label
-      };
-      if (opts.attach.icon) info.icon = opts.attach.icon;
-      ownTerminalInfo.set(term, info);
+      const { worktreePath, label, icon } = opts.attach;
+      ownTerminalInfo.set(term, { worktreePath, label, ...(icon ? { icon } : {}) });
       provider.refresh();
     }
     return term;
@@ -250,11 +242,9 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     debounce = setTimeout(() => provider.refresh(), DEBOUNCE_MS);
   };
 
-  // Tracks the last stop_reason seen per session file, so we only fire a
-  // notification on the *transition* into end_turn — not every refresh.
-  // `null` means "we've inspected this file at least once but haven't seen an
-  // assistant message yet" (suppresses the very first notification when the
-  // extension starts on an already-finished transcript).
+  // Fire only on the transition into end_turn (not every refresh). The first
+  // observation per file is treated as a seed so we don't notify for transcripts
+  // that were already finished before the extension started.
   const lastStopReason = new Map<string, string | null>();
 
   const checkFinished = async (uri: vscode.Uri): Promise<void> => {
@@ -280,7 +270,6 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     registryWatcher?.dispose();
     lastStopReason.clear();
     try {
-      // Transcripts → reflect new/changed sessions.
       watcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(vscode.Uri.file(scanner.resolveProjectsDir()), '**/*.jsonl')
       );
