@@ -22,6 +22,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `custom`), `vswt.usage.alertThreshold`, `vswt.usage.customBlockTokens`,
   `vswt.usage.customWeekTokens`. Tier defaults are best-guess token budgets;
   switch to `custom` to dial them in.
+- **Bookmark sessions** (star icon on the row, right-click → *Bookmark
+  Session*). Bookmarked sessions float to the top of their worktree and are
+  exempt from the age/cap filters, so a sessions you care about stays visible
+  no matter how old it gets.
+- **Expand ↑/↓ into commit lists.** The ahead/behind counts in a worktree
+  badge are now their own collapsible nodes; opening one reveals the actual
+  commits (subject · short SHA · relative time). Click copies the full SHA.
+- **PR status badge per worktree.** A `PR #123 ✓ / ✗ / ⏳ / draft / merged`
+  pill next to each worktree, fetched via `gh pr view` with a 120s cache and
+  background refresh. Hover for state + checks summary + link.
+- **Finish notification** (opt-in `vswt.sessions.notifyOnFinish`, default
+  off). When a running session writes an assistant message with
+  `stop_reason=end_turn`, the OS shows a desktop notification — handy for
+  long turns where you've tabbed away.
+- **Full-text search across transcripts.** A search button in the view title
+  (and `vswt.sessions.search` command) opens a QuickPick that searches every
+  `.jsonl` transcript for a substring, with contextual snippets. Selecting a
+  result resumes that session in a terminal. The index is in-memory, keyed
+  by mtime, and only reparses files that actually changed.
+- **Worktree terminals appear in the tree.** When you open a terminal via
+  *New Claude / Shell / Term here*, it shows up as a leaf under that
+  worktree. Clicking it reveals the existing terminal (no duplicates).
+
+### Changed
+- **Worktree row description is tighter.** The full path is no longer shown
+  inline (it's still in the tooltip) — only `●N ↑N ↓N` and any PR badge.
+- **Past sessions collapse.** Older sessions are folded under a single
+  *Past sessions (N)* node so the running and bookmarked ones aren't lost
+  in a long list. Open the group to see them with the existing cap and
+  *Show N older…* overflow.
+
+### Fixed
+- **Resume into a stale shell.** If a session's terminal is still open but
+  Claude itself exited (Ctrl+C), clicking the session now re-runs
+  `claude --resume <id>` in that same shell instead of leaving you at a
+  bare prompt.
 
 ## [0.2.2] — 2026-05-31
 
