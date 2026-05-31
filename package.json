@@ -2,7 +2,7 @@
   "name": "vswt",
   "displayName": "Worktree Sessions for Claude Code",
   "description": "A sidebar tree of your git worktrees and the Claude Code sessions in each — see which are running, resume past ones in a click, and create / diff / pull / push / PR / finish worktrees, across one repo or a whole folder of projects.",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "publisher": "vana123",
   "license": "MIT",
   "engines": {
@@ -45,7 +45,8 @@
   "homepage": "https://github.com/vana123/vswt#readme",
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onView:vswt.sessions"
+    "onView:vswt.sessions",
+    "onStartupFinished"
   ],
   "contributes": {
     "viewsContainers": {
@@ -249,6 +250,16 @@
         "title": "Remove Bookmark",
         "category": "Worktree Sessions",
         "icon": "$(star-full)"
+      },
+      {
+        "command": "vswt.usage.showDetails",
+        "title": "Show Claude Code Usage",
+        "category": "Worktree Sessions"
+      },
+      {
+        "command": "vswt.usage.refresh",
+        "title": "Refresh Claude Code Usage",
+        "category": "Worktree Sessions"
       }
     ],
     "keybindings": [
@@ -537,6 +548,14 @@
         {
           "command": "vswt.commits.copySha",
           "when": "false"
+        },
+        {
+          "command": "vswt.usage.showDetails",
+          "when": "config.vswt.usage.enabled"
+        },
+        {
+          "command": "vswt.usage.refresh",
+          "when": "config.vswt.usage.enabled"
         }
       ]
     },
@@ -630,6 +649,47 @@
           "type": "boolean",
           "default": false,
           "description": "Show a desktop notification when a running Claude session finishes its turn (assistant message with stop_reason=end_turn)."
+        },
+        "vswt.usage.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Claude Code usage indicator in the status bar (and badge the sidebar icon when nearing limits)."
+        },
+        "vswt.usage.plan": {
+          "type": "string",
+          "enum": [
+            "pro",
+            "max5",
+            "max20",
+            "custom"
+          ],
+          "enumDescriptions": [
+            "Claude Pro ($20/mo).",
+            "Claude Max 5× ($100/mo).",
+            "Claude Max 20× ($200/mo).",
+            "Custom token budgets — use the customBlockTokens / customWeekTokens settings."
+          ],
+          "default": "max20",
+          "description": "Subscription plan used to compute percentage of limit. Tier defaults are best-guess estimates; tune via custom* for precision."
+        },
+        "vswt.usage.alertThreshold": {
+          "type": "number",
+          "default": 80,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Percentage at which the status bar turns yellow and an activity-bar badge appears. 100%+ turns red."
+        },
+        "vswt.usage.customBlockTokens": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Custom 5-hour block token budget. Only used when vswt.usage.plan is \"custom\". 0 falls back to Max 5× defaults."
+        },
+        "vswt.usage.customWeekTokens": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Custom weekly token budget. Only used when vswt.usage.plan is \"custom\". 0 falls back to Max 5× defaults."
         },
         "vswt.extraShells": {
           "type": "array",

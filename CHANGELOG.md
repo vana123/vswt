@@ -4,6 +4,25 @@ All notable changes to Worktree Sessions for Claude Code will be documented in t
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] — 2026-05-31
+
+### Added
+- **Claude Code usage indicator.** A status-bar item shows the share of your
+  5-hour block and weekly token budget consumed (`Claude  47% · wk 31%`), turns
+  yellow at the alert threshold (`vswt.usage.alertThreshold`, default 80%) and
+  red past 100%. Hovering reveals a per-model breakdown and the time the 5-hour
+  block resets. When usage crosses the threshold the sidebar's activity-bar
+  icon also gets a numeric badge.
+- Usage is computed entirely locally from `~/.claude/projects/**/*.jsonl`
+  transcripts (input + output + cache-creation tokens; cache reads excluded as
+  they don't count against the limit pool). Block boundaries follow Anthropic's
+  "5 hours since first message in window" mechanic; the weekly figure is a
+  rolling 7-day total.
+- Settings: `vswt.usage.enabled`, `vswt.usage.plan` (`pro` / `max5` / `max20` /
+  `custom`), `vswt.usage.alertThreshold`, `vswt.usage.customBlockTokens`,
+  `vswt.usage.customWeekTokens`. Tier defaults are best-guess token budgets;
+  switch to `custom` to dial them in.
+
 ## [0.2.2] — 2026-05-31
 
 ### Changed

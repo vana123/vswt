@@ -8,6 +8,7 @@ import { WorktreeManager } from './git/WorktreeManager';
 import { initSettings } from './Settings';
 import { normalizePath } from './sessions/path-utils';
 import { registerSessionsExplorer } from './sessions/sessions-explorer';
+import { registerUsage } from './usage';
 
 const execFileAsync = promisify(execFile);
 
@@ -706,6 +707,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   });
   treeRefresh = explorer.refresh;
+
+  registerUsage(context, explorer, output);
 
   // Probe for installed shells in the background; refresh the tree once done.
   void initSettings().then(() => void refresh());

@@ -66,7 +66,14 @@ function getClaudePath(): string {
   return (cfg.get<string>('claude.path') ?? 'claude').trim() || 'claude';
 }
 
-export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh: () => void } {
+export interface SessionsExplorerHandle {
+  refresh: () => void;
+  treeView: vscode.TreeView<SessionsNode>;
+  projectsDir: () => string;
+  onProjectsDirChange: vscode.Event<string>;
+}
+
+export function registerSessionsExplorer(deps: SessionsExplorerDeps): SessionsExplorerHandle {
   const { context, output } = deps;
 
   // Gates the Ctrl+V paste-image binding (vswt.terminalActive) so it only
@@ -313,11 +320,13 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
   };
   if (treeView.visible) startActiveTimer();
 
+  const projectsDirEmitter = new vscode.EventEmitter<string>();
   const configSub = vscode.workspace.onDidChangeConfiguration(e => {
     if (e.affectsConfiguration(`${SECTION}.projectsDir`)) {
       scanner.setProjectsDir(getProjectsDir());
       setupWatcher();
       provider.refresh();
+      projectsDirEmitter.fire(scanner.resolveProjectsDir());
     } else if (
       e.affectsConfiguration(SECTION) ||
       e.affectsConfiguration('vswt.claude.path') ||
@@ -529,5 +538,12 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     })
   );
 
-  return { refresh: () => provider.refresh() };
+  context.subscriptions.push(projectsDirEmitter);
+
+  return {
+    refresh: () => provider.refresh(),
+    treeView,
+    projectsDir: () => scanner.resolveProjectsDir(),
+    onProjectsDirChange: projectsDirEmitter.event
+  };
 }
