@@ -25,11 +25,34 @@ interface CacheEntry {
   session: ClaudeSession;
 }
 
+interface IndexEntry {
+  mtimeMs: number;
+  paragraphs: Array<{ role: 'user' | 'assistant'; text: string }>;
+}
+
+export interface SessionSearchMatch {
+  session: ClaudeSession;
+  snippet: string;
+  role: 'user' | 'assistant';
+}
+
 /** Only the head of each transcript is read; metadata lives in the first records. */
 const MAX_SCAN_BYTES = 256 * 1024;
+/** Last-turn lookup reads only the tail. */
+const TAIL_SCAN_BYTES = 32 * 1024;
+
+export interface SessionTail {
+  /** Session id read from the last parseable record (falls back to file name). */
+  sessionId: string | null;
+  /** `stop_reason` of the last assistant message, if present. */
+  stopReason: string | null;
+  /** `type` of the last record (`user` / `assistant` / `tool_result` / …). */
+  lastType: string | null;
+}
 
 export class SessionScanner {
   private readonly cache = new Map<string, CacheEntry>();
+  private readonly searchIndex = new Map<string, IndexEntry>();
 
   constructor(private projectsDir: string) {}
 
@@ -37,6 +60,7 @@ export class SessionScanner {
     if (dir === this.projectsDir) return;
     this.projectsDir = dir;
     this.cache.clear();
+    this.searchIndex.clear();
   }
 
   /** Absolute projects directory; empty override resolves to `~/.claude/projects`. */
@@ -123,6 +147,130 @@ export class SessionScanner {
       if (!seen.has(key)) this.cache.delete(key);
     }
     return sessions;
+  }
+
+  /**
+   * Substring search across all transcripts. Reads the full file the first
+   * time, then re-uses the parsed paragraphs unless mtime changed.
+   * One match per session at most; capped at `limit`.
+   */
+  async searchSessions(query: string, limit = 50): Promise<SessionSearchMatch[]> {
+    const q = query.trim();
+    if (!q) return [];
+    const needle = q.toLowerCase();
+    const sessions = await this.scan();
+    sessions.sort((a, b) => b.lastActivity - a.lastActivity);
+    const matches: SessionSearchMatch[] = [];
+    for (const session of sessions) {
+      const entry = await this.indexEntry(session.filePath);
+      if (!entry) continue;
+      for (const p of entry.paragraphs) {
+        const idx = p.text.toLowerCase().indexOf(needle);
+        if (idx < 0) continue;
+        const start = Math.max(0, idx - 60);
+        const end = Math.min(p.text.length, idx + needle.length + 60);
+        const snippet =
+          (start > 0 ? '…' : '') +
+          p.text.slice(start, end).replace(/\s+/g, ' ').trim() +
+          (end < p.text.length ? '…' : '');
+        matches.push({ session, snippet, role: p.role });
+        break;
+      }
+      if (matches.length >= limit) break;
+    }
+    return matches;
+  }
+
+  private async indexEntry(filePath: string): Promise<IndexEntry | null> {
+    let mtimeMs: number;
+    try {
+      mtimeMs = (await fs.stat(filePath)).mtimeMs;
+    } catch {
+      return null;
+    }
+    const cached = this.searchIndex.get(filePath);
+    if (cached && cached.mtimeMs === mtimeMs) return cached;
+    let text: string;
+    try {
+      text = await fs.readFile(filePath, 'utf8');
+    } catch {
+      return null;
+    }
+    const paragraphs: IndexEntry['paragraphs'] = [];
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      let o: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(line);
+        if (!parsed || typeof parsed !== 'object') continue;
+        o = parsed as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const type = o['type'];
+      if (type !== 'user' && type !== 'assistant') continue;
+      const body = extractMessageText(o['message']);
+      if (!body) continue;
+      paragraphs.push({ role: type, text: body });
+    }
+    const entry: IndexEntry = { mtimeMs, paragraphs };
+    this.searchIndex.set(filePath, entry);
+    return entry;
+  }
+
+  /**
+   * Read the tail of a transcript and extract enough state to tell whether
+   * Claude finished its turn. Cheap — bounded by `TAIL_SCAN_BYTES`.
+   */
+  async readTail(filePath: string): Promise<SessionTail | null> {
+    let text: string;
+    try {
+      const fh = await fs.open(filePath, 'r');
+      try {
+        const size = (await fh.stat()).size;
+        const readSize = Math.min(size, TAIL_SCAN_BYTES);
+        const buf = Buffer.alloc(readSize);
+        await fh.read(buf, 0, readSize, size - readSize);
+        text = buf.toString('utf8');
+      } finally {
+        await fh.close();
+      }
+    } catch {
+      return null;
+    }
+    // If we didn't start at byte 0, the first line is likely a fragment.
+    const lines = text.split(/\r?\n/);
+    if (lines.length > 1) lines.shift();
+    let sessionId: string | null = null;
+    let stopReason: string | null = null;
+    let lastType: string | null = null;
+    // Walk bottom-up: the most recent records carry the freshest state.
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]?.trim();
+      if (!line) continue;
+      let o: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(line);
+        if (!parsed || typeof parsed !== 'object') continue;
+        o = parsed as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (!sessionId) sessionId = asString(o['sessionId']);
+      if (!lastType) lastType = asString(o['type']);
+      if (stopReason === null && o['type'] === 'assistant') {
+        const msg = o['message'];
+        if (msg && typeof msg === 'object') {
+          const sr = asString((msg as Record<string, unknown>)['stop_reason']);
+          if (sr) {
+            stopReason = sr;
+            break;
+          }
+        }
+      }
+    }
+    return { sessionId, stopReason, lastType };
   }
 
   private async readSession(filePath: string): Promise<ClaudeSession | null> {
@@ -259,4 +407,26 @@ function cleanMessage(s: string): string | null {
   const t = s.replace(/\s+/g, ' ').trim();
   if (!t || t.startsWith('<')) return null;
   return t;
+}
+
+/** All text payload of a message (user or assistant), incl. content/thinking blocks. */
+function extractMessageText(message: unknown): string | null {
+  if (!message || typeof message !== 'object') return null;
+  const content = (message as { content?: unknown }).content;
+  if (typeof content === 'string') {
+    const t = content.trim();
+    return t && !t.startsWith('<') ? t : null;
+  }
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const part of content) {
+      if (!part || typeof part !== 'object') continue;
+      const p = part as { type?: unknown; text?: unknown; thinking?: unknown };
+      if (p.type === 'text' && typeof p.text === 'string') parts.push(p.text);
+      else if (p.type === 'thinking' && typeof p.thinking === 'string') parts.push(p.thinking);
+    }
+    const joined = parts.join('\n').trim();
+    return joined && !joined.startsWith('<') ? joined : null;
+  }
+  return null;
 }

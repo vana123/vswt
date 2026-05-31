@@ -110,6 +110,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "vswt.sessions.search",
+        "title": "Search Sessions…",
+        "category": "Worktree Sessions",
+        "icon": "$(search)"
+      },
+      {
         "command": "vswt.sessions.toggleUnmatched",
         "title": "Toggle Sessions Outside This Repo",
         "category": "Worktree Sessions",
@@ -220,6 +226,29 @@
         "command": "vswt.wt.showDiff",
         "title": "Open Diff",
         "category": "Worktree Sessions"
+      },
+      {
+        "command": "vswt.terminals.show",
+        "title": "Show Terminal",
+        "category": "Worktree Sessions"
+      },
+      {
+        "command": "vswt.commits.copySha",
+        "title": "Copy Commit SHA",
+        "category": "Worktree Sessions",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "vswt.sessions.bookmark",
+        "title": "Bookmark Session",
+        "category": "Worktree Sessions",
+        "icon": "$(star-empty)"
+      },
+      {
+        "command": "vswt.sessions.unbookmark",
+        "title": "Remove Bookmark",
+        "category": "Worktree Sessions",
+        "icon": "$(star-full)"
       }
     ],
     "keybindings": [
@@ -232,19 +261,24 @@
     "menus": {
       "view/title": [
         {
-          "command": "vswt.createWorktree",
+          "command": "vswt.sessions.search",
           "when": "view == vswt.sessions",
           "group": "navigation@1"
         },
         {
-          "command": "vswt.sessions.refresh",
+          "command": "vswt.createWorktree",
           "when": "view == vswt.sessions",
           "group": "navigation@2"
         },
         {
-          "command": "vswt.sessions.toggleUnmatched",
+          "command": "vswt.sessions.refresh",
           "when": "view == vswt.sessions",
           "group": "navigation@3"
+        },
+        {
+          "command": "vswt.sessions.toggleUnmatched",
+          "when": "view == vswt.sessions",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
@@ -345,32 +379,57 @@
         },
         {
           "command": "vswt.sessions.resume",
-          "when": "view == vswt.sessions && viewItem == vswtSessionsSession",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsSession/",
           "group": "inline@1"
         },
         {
-          "command": "vswt.sessions.rename",
-          "when": "view == vswt.sessions && viewItem == vswtSessionsSession",
+          "command": "vswt.sessions.bookmark",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsSession.unbookmarked",
+          "group": "inline@2"
+        },
+        {
+          "command": "vswt.sessions.unbookmark",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsSession.bookmarked",
           "group": "inline@2"
         },
         {
           "command": "vswt.sessions.rename",
-          "when": "view == vswt.sessions && viewItem == vswtSessionsSession",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsSession/",
+          "group": "inline@3"
+        },
+        {
+          "command": "vswt.sessions.bookmark",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsSession.unbookmarked",
           "group": "1_session@1"
         },
         {
-          "command": "vswt.sessions.revealTranscript",
-          "when": "view == vswt.sessions && viewItem == vswtSessionsSession",
+          "command": "vswt.sessions.unbookmark",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsSession.bookmarked",
+          "group": "1_session@1"
+        },
+        {
+          "command": "vswt.sessions.rename",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsSession/",
           "group": "1_session@2"
         },
         {
-          "command": "vswt.sessions.copySessionId",
-          "when": "view == vswt.sessions && viewItem == vswtSessionsSession",
+          "command": "vswt.sessions.revealTranscript",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsSession/",
           "group": "1_session@3"
+        },
+        {
+          "command": "vswt.sessions.copySessionId",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsSession/",
+          "group": "1_session@4"
         },
         {
           "command": "vswt.wt.showDiff",
           "when": "view == vswt.sessions && viewItem == vswtSessionsFile",
+          "group": "inline@1"
+        },
+        {
+          "command": "vswt.commits.copySha",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsCommit",
           "group": "inline@1"
         }
       ],
@@ -462,6 +521,22 @@
         {
           "command": "vswt.wt.showDiff",
           "when": "false"
+        },
+        {
+          "command": "vswt.terminals.show",
+          "when": "false"
+        },
+        {
+          "command": "vswt.sessions.bookmark",
+          "when": "false"
+        },
+        {
+          "command": "vswt.sessions.unbookmark",
+          "when": "false"
+        },
+        {
+          "command": "vswt.commits.copySha",
+          "when": "false"
         }
       ]
     },
@@ -550,6 +625,11 @@
           ],
           "default": "name",
           "description": "What to show as the Claude session label."
+        },
+        "vswt.sessions.notifyOnFinish": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show a desktop notification when a running Claude session finishes its turn (assistant message with stop_reason=end_turn)."
         },
         "vswt.extraShells": {
           "type": "array",

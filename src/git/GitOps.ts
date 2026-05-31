@@ -40,6 +40,14 @@ export interface FileChange {
   path: string;
 }
 
+export interface CommitInfo {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  author: string;
+  dateIso: string;
+}
+
 export interface AddWorktreeOptions {
   path: string;
   branch: string;
@@ -135,6 +143,38 @@ export class GitOps {
       if (file) result.push({ status, path: file });
     }
     return result;
+  }
+
+  /**
+   * List commits this branch has relative to its upstream.
+   * `ahead`  = commits on HEAD not in @{u} (need to push)
+   * `behind` = commits on @{u} not in HEAD (need to pull)
+   * Returns [] if there is no upstream configured.
+   */
+  async listCommitsRelative(direction: 'ahead' | 'behind', limit = 50): Promise<CommitInfo[]> {
+    const range = direction === 'ahead' ? '@{u}..HEAD' : 'HEAD..@{u}';
+    const fmt = ['%H', '%h', '%s', '%an', '%aI'].join('%x1f');
+    try {
+      const out = await this.git('log', range, `--max-count=${limit}`, `--format=${fmt}`);
+      const commits: CommitInfo[] = [];
+      for (const raw of out.split(/\r?\n/)) {
+        const line = raw.replace(/\r$/, '');
+        if (!line) continue;
+        const parts = line.split('\x1f');
+        const [sha, shortSha, subject, author, dateIso] = parts;
+        if (!sha) continue;
+        commits.push({
+          sha,
+          shortSha: shortSha ?? sha.slice(0, 7),
+          subject: subject ?? '',
+          author: author ?? '',
+          dateIso: dateIso ?? ''
+        });
+      }
+      return commits;
+    } catch {
+      return [];
+    }
   }
 
   async listBranches(includeRemote = true): Promise<BranchInfo[]> {

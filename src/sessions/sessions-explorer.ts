@@ -2,8 +2,10 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { getSettings } from '../Settings';
 import { readClipboardImage, formatImageReference } from '../clipboard';
-import { SessionScanner } from './session-scanner';
-import { SessionsConfig, SessionsNode, SessionsTreeProvider } from './sessions-tree-provider';
+import { PRStatusCache } from '../git/PRStatus';
+import { SessionScanner, SessionSearchMatch } from './session-scanner';
+import { formatRelativeTime, truncate } from './format-utils';
+import { SessionsConfig, SessionsNode, SessionsTreeProvider, TerminalRef } from './sessions-tree-provider';
 
 export interface SessionsExplorerDeps {
   context: vscode.ExtensionContext;
@@ -12,6 +14,8 @@ export interface SessionsExplorerDeps {
   getPinned: () => Set<string>;
   getBases: () => Record<string, string>;
   getSessionNames: () => Record<string, string>;
+  getBookmarks: () => Set<string>;
+  toggleBookmark: (sessionId: string) => Promise<void>;
   renameSession: (sessionId: string, currentName: string) => Promise<void>;
   createWorktree: (repoRoot?: string) => Promise<void>;
   rename: (worktreePath: string, repoRoot: string, currentBranch: string) => Promise<void>;
@@ -42,6 +46,10 @@ function getConfig(): SessionsConfig {
   };
 }
 
+function notifyOnFinish(): boolean {
+  return vscode.workspace.getConfiguration(SECTION).get<boolean>('notifyOnFinish') ?? false;
+}
+
 function getProjectsDir(): string {
   return vscode.workspace.getConfiguration(SECTION).get<string>('projectsDir') ?? '';
 }
@@ -67,15 +75,34 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
   // Resume terminals keyed by session id, so clicking a session reuses its
   // terminal instead of spawning a duplicate each time.
   const sessionTerminals = new Map<string, vscode.Terminal>();
+  // Worktree-attached terminals shown as tree leaves under their worktree.
+  // Resume terminals are NOT here — they already appear as the session node.
+  const ownTerminalInfo = new Map<vscode.Terminal, { worktreePath: string; label: string; icon?: string }>();
+
+  const getTerminals = (worktreePath: string): TerminalRef[] => {
+    const out: TerminalRef[] = [];
+    for (const [term, info] of ownTerminalInfo) {
+      if (info.worktreePath !== worktreePath) continue;
+      if (term.exitStatus !== undefined) continue;
+      const ref: TerminalRef = { terminal: term, label: info.label };
+      if (info.icon) ref.icon = info.icon;
+      out.push(ref);
+    }
+    return out;
+  };
 
   const scanner = new SessionScanner(getProjectsDir());
+  const prCache = new PRStatusCache();
   const provider = new SessionsTreeProvider(
     scanner,
     deps.getRepos,
     getConfig,
     deps.getPinned,
     deps.getBases,
-    deps.getSessionNames
+    deps.getSessionNames,
+    getTerminals,
+    deps.getBookmarks,
+    worktreePath => prCache.get(worktreePath, () => provider.refresh())
   );
   const treeView = vscode.window.createTreeView('vswt.sessions', {
     treeDataProvider: provider,
@@ -97,6 +124,7 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     shellPath?: string;
     icon?: string;
     send?: string;
+    attach?: { worktreePath: string; label: string; icon?: string };
   }): vscode.Terminal => {
     const tOpts: vscode.TerminalOptions = { name: opts.name };
     if (opts.cwd) tOpts.cwd = vscode.Uri.file(opts.cwd);
@@ -107,6 +135,15 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     term.show();
     if (opts.send) term.sendText(opts.send, true);
     updateTerminalContext(term);
+    if (opts.attach) {
+      const info: { worktreePath: string; label: string; icon?: string } = {
+        worktreePath: opts.attach.worktreePath,
+        label: opts.attach.label
+      };
+      if (opts.attach.icon) info.icon = opts.attach.icon;
+      ownTerminalInfo.set(term, info);
+      provider.refresh();
+    }
     return term;
   };
 
@@ -125,8 +162,64 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
       name: `shell:${branch}`,
       cwd: worktreePath,
       icon: 'terminal',
+      attach: { worktreePath, label: `shell:${branch}`, icon: 'terminal' },
       ...(shellPath ? { shellPath } : {})
     });
+  };
+
+  type SearchPick = vscode.QuickPickItem & { match: SessionSearchMatch };
+
+  const searchSessions = (): void => {
+    const qp = vscode.window.createQuickPick<SearchPick>();
+    qp.placeholder = 'Search session transcripts (substring, case-insensitive)';
+    qp.matchOnDescription = true;
+    qp.matchOnDetail = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let token = 0;
+    qp.onDidChangeValue(value => {
+      if (timer) clearTimeout(timer);
+      const v = value.trim();
+      if (!v) {
+        qp.items = [];
+        qp.busy = false;
+        return;
+      }
+      qp.busy = true;
+      const myToken = ++token;
+      timer = setTimeout(async () => {
+        try {
+          const matches = await scanner.searchSessions(v);
+          if (myToken !== token) return;
+          qp.items = matches.map(m => {
+            const label = m.session.title ?? m.session.firstMessage ?? m.session.id.slice(0, 8);
+            return {
+              label: truncate(label, 70),
+              description: truncate(m.snippet, 120),
+              detail: `${m.role} · ${formatRelativeTime(m.session.lastActivity)} · ${m.session.cwd ?? ''}`,
+              match: m
+            };
+          });
+        } finally {
+          if (myToken === token) qp.busy = false;
+        }
+      }, 150);
+    });
+    qp.onDidAccept(() => {
+      const pick = qp.selectedItems[0];
+      qp.hide();
+      if (!pick) return;
+      const session = pick.match.session;
+      void vscode.commands.executeCommand('vswt.sessions.resume', {
+        kind: 'session',
+        session,
+        cwd: session.cwd,
+        branch: session.gitBranch,
+        active: false,
+        bookmarked: deps.getBookmarks().has(session.id)
+      } satisfies SessionsNode);
+    });
+    qp.onDidHide(() => qp.dispose());
+    qp.show();
   };
 
   const pasteImage = async (): Promise<void> => {
@@ -157,19 +250,49 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     debounce = setTimeout(() => provider.refresh(), DEBOUNCE_MS);
   };
 
+  // Tracks the last stop_reason seen per session file, so we only fire a
+  // notification on the *transition* into end_turn — not every refresh.
+  // `null` means "we've inspected this file at least once but haven't seen an
+  // assistant message yet" (suppresses the very first notification when the
+  // extension starts on an already-finished transcript).
+  const lastStopReason = new Map<string, string | null>();
+
+  const checkFinished = async (uri: vscode.Uri): Promise<void> => {
+    if (!notifyOnFinish()) return;
+    const tail = await scanner.readTail(uri.fsPath);
+    if (!tail) return;
+    const prev = lastStopReason.get(uri.fsPath);
+    lastStopReason.set(uri.fsPath, tail.stopReason);
+    if (prev === undefined) return; // first observation — seed only
+    if (tail.stopReason !== 'end_turn' || prev === 'end_turn') return;
+    if (!tail.sessionId) return;
+    const running = await scanner.runningSessionIds();
+    if (!running.has(tail.sessionId)) return;
+    const label =
+      deps.getSessionNames()[tail.sessionId] ?? path.basename(uri.fsPath, '.jsonl');
+    void vscode.window.showInformationMessage(`Claude finished: ${label}`);
+  };
+
   let watcher: vscode.FileSystemWatcher | undefined;
   let registryWatcher: vscode.FileSystemWatcher | undefined;
   const setupWatcher = (): void => {
     watcher?.dispose();
     registryWatcher?.dispose();
+    lastStopReason.clear();
     try {
       // Transcripts → reflect new/changed sessions.
       watcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(vscode.Uri.file(scanner.resolveProjectsDir()), '**/*.jsonl')
       );
       watcher.onDidCreate(scheduleRefresh);
-      watcher.onDidChange(scheduleRefresh);
-      watcher.onDidDelete(scheduleRefresh);
+      watcher.onDidChange(uri => {
+        scheduleRefresh();
+        void checkFinished(uri);
+      });
+      watcher.onDidDelete(uri => {
+        lastStopReason.delete(uri.fsPath);
+        scheduleRefresh();
+      });
       context.subscriptions.push(watcher);
 
       // Live-session registry → a file appears on start and is removed on exit,
@@ -241,13 +364,18 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     vscode.window.onDidChangeActiveTerminal(updateTerminalContext),
     vscode.window.onDidCloseTerminal(t => {
       ownTerminals.delete(t);
+      const hadAttached = ownTerminalInfo.delete(t);
       for (const [id, term] of sessionTerminals) {
         if (term === t) sessionTerminals.delete(id);
       }
+      if (hadAttached) provider.refresh();
     }),
 
     // View title
-    vscode.commands.registerCommand('vswt.sessions.refresh', () => provider.refresh()),
+    vscode.commands.registerCommand('vswt.sessions.refresh', () => {
+      prCache.invalidate();
+      provider.refresh();
+    }),
     vscode.commands.registerCommand('vswt.createWorktree', () => deps.createWorktree()),
     vscode.commands.registerCommand('vswt.sessions.toggleUnmatched', async () => {
       const cfg = vscode.workspace.getConfiguration(SECTION);
@@ -255,6 +383,7 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
       await cfg.update('showUnmatched', !current, vscode.ConfigurationTarget.Global);
     }),
     vscode.commands.registerCommand('vswt.pasteImage', pasteImage),
+    vscode.commands.registerCommand('vswt.sessions.search', searchSessions),
 
     // Repo actions
     vscode.commands.registerCommand('vswt.repo.newWorktree', (node?: SessionsNode) => {
@@ -286,7 +415,14 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     vscode.commands.registerCommand('vswt.wt.newClaude', (node?: SessionsNode) => {
       const t = asWorktree(node);
       if (!t) return;
-      openTerminal({ name: `claude:${branchOf(t)}`, cwd: t.group.info.path, icon: 'sparkle', send: getClaudePath() });
+      const branch = branchOf(t);
+      openTerminal({
+        name: `claude:${branch}`,
+        cwd: t.group.info.path,
+        icon: 'sparkle',
+        send: getClaudePath(),
+        attach: { worktreePath: t.group.info.path, label: `claude:${branch}`, icon: 'sparkle' }
+      });
     }),
     vscode.commands.registerCommand('vswt.wt.newShell', (node?: SessionsNode) => {
       const t = asWorktree(node);
@@ -294,7 +430,16 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     }),
     vscode.commands.registerCommand('vswt.wt.term', (node?: SessionsNode) => {
       const t = asWorktree(node);
-      if (t) openTerminal({ name: `${path.basename(t.group.info.path)} · terminal`, cwd: t.group.info.path });
+      if (!t) return;
+      const label = `${path.basename(t.group.info.path)} · terminal`;
+      openTerminal({
+        name: label,
+        cwd: t.group.info.path,
+        attach: { worktreePath: t.group.info.path, label, icon: 'terminal' }
+      });
+    }),
+    vscode.commands.registerCommand('vswt.terminals.show', (node?: SessionsNode) => {
+      if (node?.kind === 'terminal' && node.terminal.exitStatus === undefined) node.terminal.show();
     }),
     vscode.commands.registerCommand('vswt.wt.pull', (node?: SessionsNode) => {
       const t = asWorktree(node);
@@ -342,18 +487,23 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     }),
 
     // Session actions
-    vscode.commands.registerCommand('vswt.sessions.resume', (node?: SessionsNode) => {
+    vscode.commands.registerCommand('vswt.sessions.resume', async (node?: SessionsNode) => {
       const t = asSession(node);
       if (!t) return;
       const id = t.session.id;
-      // Reuse an existing live terminal for this session instead of duplicating.
+      const resumeCmd = `${getResumeCommand()} ${id}`;
       const existing = sessionTerminals.get(id);
       if (existing && existing.exitStatus === undefined) {
         existing.show();
+        // If Claude itself exited (Ctrl+C) but the shell terminal is still
+        // open, the registry no longer lists this session — re-run resume
+        // in the same shell instead of leaving the user at a bare prompt.
+        const running = await scanner.runningSessionIds();
+        if (!running.has(id)) existing.sendText(resumeCmd, true);
         return;
       }
       const branch = t.branch ?? 'session';
-      const term = openTerminal({ name: `claude:${branch}`, cwd: t.cwd, send: `${getResumeCommand()} ${id}` });
+      const term = openTerminal({ name: `claude:${branch}`, cwd: t.cwd, send: resumeCmd });
       sessionTerminals.set(id, term);
     }),
     vscode.commands.registerCommand('vswt.sessions.rename', (node?: SessionsNode) => {
@@ -373,6 +523,19 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
       if (!t) return;
       await vscode.env.clipboard.writeText(t.session.id);
       void vscode.window.showInformationMessage(`vsWT: copied session id ${t.session.id}`);
+    }),
+    vscode.commands.registerCommand('vswt.commits.copySha', async (node?: SessionsNode) => {
+      if (node?.kind !== 'commit') return;
+      await vscode.env.clipboard.writeText(node.commit.sha);
+      void vscode.window.showInformationMessage(`vsWT: copied commit ${node.commit.shortSha}`);
+    }),
+    vscode.commands.registerCommand('vswt.sessions.bookmark', (node?: SessionsNode) => {
+      const t = asSession(node);
+      if (t) void deps.toggleBookmark(t.session.id);
+    }),
+    vscode.commands.registerCommand('vswt.sessions.unbookmark', (node?: SessionsNode) => {
+      const t = asSession(node);
+      if (t) void deps.toggleBookmark(t.session.id);
     })
   );
 

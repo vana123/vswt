@@ -14,6 +14,7 @@ const execFileAsync = promisify(execFile);
 const STATE_KEY_PINNED = 'vswt.pinnedPaths';
 const STATE_KEY_BASES = 'vswt.worktreeBases';
 const STATE_KEY_SESSION_NAMES = 'vswt.sessionNames';
+const STATE_KEY_BOOKMARKS = 'vswt.sessionBookmarks';
 
 function getSessionNames(context: vscode.ExtensionContext): Record<string, string> {
   return { ...(context.globalState.get<Record<string, string>>(STATE_KEY_SESSION_NAMES) ?? {}) };
@@ -28,6 +29,19 @@ async function setSessionName(
   if (name) names[sessionId] = name;
   else delete names[sessionId];
   await context.globalState.update(STATE_KEY_SESSION_NAMES, names);
+}
+
+function getBookmarks(context: vscode.ExtensionContext): Set<string> {
+  return new Set(context.globalState.get<string[]>(STATE_KEY_BOOKMARKS) ?? []);
+}
+
+async function toggleBookmark(context: vscode.ExtensionContext, sessionId: string): Promise<boolean> {
+  const set = getBookmarks(context);
+  const next = !set.has(sessionId);
+  if (next) set.add(sessionId);
+  else set.delete(sessionId);
+  await context.globalState.update(STATE_KEY_BOOKMARKS, [...set]);
+  return next;
 }
 
 function getPinnedPaths(context: vscode.ExtensionContext): Set<string> {
@@ -644,6 +658,11 @@ export function activate(context: vscode.ExtensionContext): void {
     getPinned: () => getPinnedPaths(context),
     getBases: () => getBases(context),
     getSessionNames: () => getSessionNames(context),
+    getBookmarks: () => getBookmarks(context),
+    toggleBookmark: async sessionId => {
+      await toggleBookmark(context, sessionId);
+      await refresh();
+    },
     renameSession: async (sessionId, currentName) => {
       const name = await vscode.window.showInputBox({
         value: currentName,

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { FileChange, GitOps, WorktreeInfo, WorktreeStatus } from '../git/GitOps';
+import { CommitInfo, FileChange, GitOps, WorktreeInfo, WorktreeStatus } from '../git/GitOps';
+import { formatPRBadge, PRStatusInfo } from '../git/PRStatus';
 import { ClaudeSession, SessionScanner } from './session-scanner';
 import { normalizePath, realpathSafe } from './path-utils';
 import { escapeMarkdown, formatRelativeTime, shortenHomePath, truncate } from './format-utils';
@@ -14,6 +15,13 @@ export interface SessionsConfig {
   maxPerWorktree: number;
 }
 
+/** Live terminal opened from the tree, attached to a specific worktree. */
+export interface TerminalRef {
+  terminal: vscode.Terminal;
+  label: string;
+  icon?: string;
+}
+
 interface WorktreeGroup {
   repoRoot: string;
   info: WorktreeInfo;
@@ -25,9 +33,11 @@ interface WorktreeGroup {
   status: WorktreeStatus | null;
   files: FileChange[];
   sessions: ClaudeSession[];
-  /** Recently-active sessions (always shown). */
+  /** Bookmarked sessions — always shown, ignored by age/cap filters. */
+  bookmarked: ClaudeSession[];
+  /** Currently-running sessions, excluding bookmarked. */
   active: ClaudeSession[];
-  /** Older sessions, after the age filter (capped at render time). */
+  /** Older sessions, after the age filter (capped at render time), excluding bookmarked. */
   historical: ClaudeSession[];
 }
 
@@ -50,7 +60,18 @@ export type SessionsNode =
   | { kind: 'worktree'; group: WorktreeGroup }
   | { kind: 'changes'; worktreePath: string; count: number }
   | { kind: 'file'; worktreePath: string; file: FileChange }
-  | { kind: 'session'; session: ClaudeSession; cwd: string | null; branch: string | null; active: boolean }
+  | { kind: 'commitsGroup'; worktreePath: string; direction: 'ahead' | 'behind'; count: number }
+  | { kind: 'commit'; worktreePath: string; direction: 'ahead' | 'behind'; commit: CommitInfo }
+  | { kind: 'terminal'; worktreePath: string; terminal: vscode.Terminal; label: string; icon?: string }
+  | {
+      kind: 'session';
+      session: ClaudeSession;
+      cwd: string | null;
+      branch: string | null;
+      active: boolean;
+      bookmarked: boolean;
+    }
+  | { kind: 'historicalGroup'; worktreePath: string; count: number }
   | { kind: 'sessionsMore'; worktreePath: string; count: number }
   | { kind: 'unmatched'; count: number };
 
@@ -68,7 +89,10 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     private readonly getConfig: () => SessionsConfig,
     private readonly getPinned: () => Set<string>,
     private readonly getBases: () => Record<string, string>,
-    private readonly getSessionNames: () => Record<string, string>
+    private readonly getSessionNames: () => Record<string, string>,
+    private readonly getTerminals: (worktreePath: string) => TerminalRef[],
+    private readonly getBookmarks: () => Set<string>,
+    private readonly getPR: (worktreePath: string) => PRStatusInfo | null | undefined
   ) {}
 
   refresh(): void {
@@ -103,19 +127,66 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     }
 
     if (element.kind === 'worktree') {
-      const { info, files, active, historical } = element.group;
-      const cap = this.getConfig().maxPerWorktree;
+      const { info, status, files, bookmarked, active, historical } = element.group;
       const nodes: SessionsNode[] = [];
       if (files.length > 0) nodes.push({ kind: 'changes', worktreePath: info.path, count: files.length });
+      if (status && status.ahead > 0) {
+        nodes.push({ kind: 'commitsGroup', worktreePath: info.path, direction: 'ahead', count: status.ahead });
+      }
+      if (status && status.behind > 0) {
+        nodes.push({ kind: 'commitsGroup', worktreePath: info.path, direction: 'behind', count: status.behind });
+      }
+      for (const t of this.getTerminals(info.path)) {
+        const node: Extract<SessionsNode, { kind: 'terminal' }> = {
+          kind: 'terminal',
+          worktreePath: info.path,
+          terminal: t.terminal,
+          label: t.label
+        };
+        if (t.icon) node.icon = t.icon;
+        nodes.push(node);
+      }
+      for (const session of bookmarked) {
+        nodes.push({
+          kind: 'session',
+          session,
+          cwd: info.path,
+          branch: info.branch,
+          active: model.running.has(session.id),
+          bookmarked: true
+        });
+      }
       for (const session of active) {
-        nodes.push({ kind: 'session', session, cwd: info.path, branch: info.branch, active: true });
+        nodes.push({
+          kind: 'session',
+          session,
+          cwd: info.path,
+          branch: info.branch,
+          active: true,
+          bookmarked: false
+        });
       }
-      const shown = cap > 0 ? historical.slice(0, cap) : historical;
-      for (const session of shown) {
-        nodes.push({ kind: 'session', session, cwd: info.path, branch: info.branch, active: false });
+      if (historical.length > 0) {
+        nodes.push({ kind: 'historicalGroup', worktreePath: info.path, count: historical.length });
       }
-      if (cap > 0 && historical.length > cap) {
-        nodes.push({ kind: 'sessionsMore', worktreePath: info.path, count: historical.length - cap });
+      return nodes;
+    }
+
+    if (element.kind === 'historicalGroup') {
+      const group = model.repos.flatMap(r => r.groups).find(g => g.info.path === element.worktreePath);
+      if (!group) return [];
+      const cap = this.getConfig().maxPerWorktree;
+      const shown = cap > 0 ? group.historical.slice(0, cap) : group.historical;
+      const nodes: SessionsNode[] = shown.map(session => ({
+        kind: 'session',
+        session,
+        cwd: group.info.path,
+        branch: group.info.branch,
+        active: false,
+        bookmarked: false
+      }));
+      if (cap > 0 && group.historical.length > cap) {
+        nodes.push({ kind: 'sessionsMore', worktreePath: group.info.path, count: group.historical.length - cap });
       }
       return nodes;
     }
@@ -129,7 +200,8 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
         session,
         cwd: group.info.path,
         branch: group.info.branch,
-        active: false
+        active: false,
+        bookmarked: false
       }));
     }
 
@@ -139,13 +211,25 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
       return group.files.map(file => ({ kind: 'file', worktreePath: element.worktreePath, file }));
     }
 
+    if (element.kind === 'commitsGroup') {
+      const commits = await new GitOps(element.worktreePath).listCommitsRelative(element.direction);
+      return commits.map(commit => ({
+        kind: 'commit',
+        worktreePath: element.worktreePath,
+        direction: element.direction,
+        commit
+      }));
+    }
+
     if (element.kind === 'unmatched') {
+      const bookmarks = this.getBookmarks();
       return model.unmatched.map(session => ({
         kind: 'session',
         session,
         cwd: session.cwd,
         branch: session.gitBranch,
-        active: model.running.has(session.id)
+        active: model.running.has(session.id),
+        bookmarked: bookmarks.has(session.id)
       }));
     }
 
@@ -179,8 +263,42 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
       }
       case 'file':
         return this.fileItem(node);
+      case 'commitsGroup': {
+        const arrow = node.direction === 'ahead' ? '↑' : '↓';
+        const label = node.direction === 'ahead' ? 'Ahead' : 'Behind';
+        const item = new vscode.TreeItem(`${arrow} ${label}`, Collapsed);
+        item.description = String(node.count);
+        item.iconPath = new vscode.ThemeIcon(node.direction === 'ahead' ? 'arrow-up' : 'arrow-down');
+        item.contextValue = 'vswtSessionsCommitsGroup';
+        item.tooltip = node.direction === 'ahead'
+          ? `${node.count} commit(s) on this branch not yet on upstream`
+          : `${node.count} commit(s) on upstream not yet on this branch`;
+        return item;
+      }
+      case 'commit':
+        return this.commitItem(node);
+      case 'terminal': {
+        const item = new vscode.TreeItem(node.label, None);
+        item.iconPath = new vscode.ThemeIcon(node.icon ?? 'terminal');
+        item.description = 'terminal';
+        item.contextValue = 'vswtSessionsTerminal';
+        item.tooltip = node.label;
+        item.command = {
+          command: 'vswt.terminals.show',
+          title: 'Show Terminal',
+          arguments: [node]
+        };
+        return item;
+      }
       case 'session':
-        return this.sessionItem(node.session, node.branch, node.active);
+        return this.sessionItem(node.session, node.branch, node.active, node.bookmarked);
+      case 'historicalGroup': {
+        const item = new vscode.TreeItem('Past sessions', Collapsed);
+        item.description = String(node.count);
+        item.iconPath = new vscode.ThemeIcon('history');
+        item.contextValue = 'vswtSessionsHistoricalGroup';
+        return item;
+      }
       case 'sessionsMore': {
         const item = new vscode.TreeItem(`Show ${node.count} older…`, Collapsed);
         item.iconPath = new vscode.ThemeIcon('history');
@@ -199,17 +317,31 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
   }
 
   private worktreeItem(group: WorktreeGroup): vscode.TreeItem {
-    const { info, isCurrent, isClaude, pinned, base, status, files, sessions, active, historical } = group;
+    const { info, isCurrent, isClaude, pinned, base, status, files, sessions, bookmarked, active, historical } = group;
     const branch = info.branch ?? '(detached)';
-    const hasChildren = files.length > 0 || active.length > 0 || historical.length > 0;
-    const state = hasChildren ? (isCurrent || active.length > 0 ? Expanded : Collapsed) : None;
+    const terminalCount = this.getTerminals(info.path).length;
+    const aheadCount = status?.ahead ?? 0;
+    const behindCount = status?.behind ?? 0;
+    const hasChildren =
+      files.length > 0 ||
+      aheadCount > 0 ||
+      behindCount > 0 ||
+      terminalCount > 0 ||
+      bookmarked.length > 0 ||
+      active.length > 0 ||
+      historical.length > 0;
+    const state = hasChildren
+      ? (isCurrent || active.length > 0 || terminalCount > 0 || bookmarked.length > 0 ? Expanded : Collapsed)
+      : None;
 
     const item = new vscode.TreeItem(branch, state);
     item.id = 'wt:' + info.path;
 
-    const descParts = [shortenHomePath(info.path)];
+    const descParts: string[] = [];
     const badge = badgeText(status);
     if (badge) descParts.push(badge);
+    const pr = this.getPR(info.path);
+    if (pr) descParts.push(formatPRBadge(pr));
     if (!hasChildren) descParts.push('—');
     item.description = descParts.join('  ·  ');
 
@@ -241,7 +373,18 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
       );
     }
     if (flags.length) md.appendMarkdown(`- flags: ${flags.join(', ')}\n`);
-    md.appendMarkdown(`- sessions: ${sessions.length} total · ${active.length} running\n`);
+    md.appendMarkdown(
+      `- sessions: ${sessions.length} total · ${active.length} running · ${bookmarked.length} bookmarked\n`
+    );
+    if (pr) {
+      const checks =
+        pr.checks === 'success' ? '✓ passed' :
+        pr.checks === 'failure' ? '✗ failed' :
+        pr.checks === 'pending' ? '⏳ running' : 'no checks';
+      md.appendMarkdown(
+        `- PR: [#${pr.number}](${pr.url}) · ${pr.state.toLowerCase()}${pr.isDraft ? ' (draft)' : ''} · ${checks}\n`
+      );
+    }
     item.tooltip = md;
     return item;
   }
@@ -260,7 +403,33 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     return item;
   }
 
-  private sessionItem(session: ClaudeSession, branch: string | null, active: boolean): vscode.TreeItem {
+  private commitItem(node: Extract<SessionsNode, { kind: 'commit' }>): vscode.TreeItem {
+    const { commit } = node;
+    const item = new vscode.TreeItem(truncate(commit.subject || commit.shortSha, 80), None);
+    const when = commit.dateIso ? formatRelativeTime(new Date(commit.dateIso).getTime()) : '';
+    item.description = [commit.shortSha, when].filter(Boolean).join(' · ');
+    item.iconPath = new vscode.ThemeIcon('git-commit');
+    item.contextValue = 'vswtSessionsCommit';
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`**${escapeMarkdown(commit.subject || '(no subject)')}**\n\n`);
+    md.appendMarkdown(`- sha: \`${commit.sha}\`\n`);
+    if (commit.author) md.appendMarkdown(`- author: ${escapeMarkdown(commit.author)}\n`);
+    if (commit.dateIso) md.appendMarkdown(`- date: ${new Date(commit.dateIso).toLocaleString()}\n`);
+    item.tooltip = md;
+    item.command = {
+      command: 'vswt.commits.copySha',
+      title: 'Copy Commit SHA',
+      arguments: [node]
+    };
+    return item;
+  }
+
+  private sessionItem(
+    session: ClaudeSession,
+    branch: string | null,
+    active: boolean,
+    bookmarked: boolean
+  ): vscode.TreeItem {
     const cfg = this.getConfig();
     const custom = this.getSessionNames()[session.id];
     const primary =
@@ -272,14 +441,25 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     item.id = 'sess:' + session.filePath;
     const rel = formatRelativeTime(session.lastActivity);
     item.description = active ? `running · ${rel}` : rel;
-    item.iconPath = active
-      ? new vscode.ThemeIcon('circle-filled', new vscode.ThemeColor('charts.green'))
-      : new vscode.ThemeIcon('comment-discussion');
-    item.contextValue = 'vswtSessionsSession';
+    // Bookmark wins for icon (so it's recognizable in the pinned strip);
+    // running state is still conveyed through "running · …" in description.
+    if (bookmarked) {
+      item.iconPath = new vscode.ThemeIcon(
+        'star-full',
+        new vscode.ThemeColor(active ? 'charts.green' : 'charts.yellow')
+      );
+    } else if (active) {
+      item.iconPath = new vscode.ThemeIcon('circle-filled', new vscode.ThemeColor('charts.green'));
+    } else {
+      item.iconPath = new vscode.ThemeIcon('comment-discussion');
+    }
+    item.contextValue = bookmarked ? 'vswtSessionsSession.bookmarked' : 'vswtSessionsSession.unbookmarked';
     item.command = {
       command: 'vswt.sessions.resume',
       title: 'Resume in Terminal',
-      arguments: [{ kind: 'session', session, cwd: session.cwd, branch, active } satisfies SessionsNode]
+      arguments: [
+        { kind: 'session', session, cwd: session.cwd, branch, active, bookmarked } satisfies SessionsNode
+      ]
     };
 
     const md = new vscode.MarkdownString();
@@ -338,6 +518,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
           status: null,
           files: [],
           sessions: [],
+          bookmarked: [],
           active: [],
           historical: []
         };
@@ -374,17 +555,20 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
       else unmatched.push(session);
     }
 
-    // Split each worktree's sessions into running (Claude's live-process registry)
-    // and age-filtered historical, most-recent first.
+    // Split each worktree's sessions into bookmarked (always shown, ignores
+    // age/cap filters), running (live-process registry), and age-filtered
+    // historical — most-recent first.
     const cfg = this.getConfig();
     const running = await this.scanner.runningSessionIds();
+    const bookmarks = this.getBookmarks();
     const now = Date.now();
     const ageCutoff = cfg.maxAgeDays > 0 ? now - cfg.maxAgeDays * 86_400_000 : 0;
     for (const group of allGroups) {
       group.sessions.sort((a, b) => b.lastActivity - a.lastActivity);
-      group.active = group.sessions.filter(s => running.has(s.id));
+      group.bookmarked = group.sessions.filter(s => bookmarks.has(s.id));
+      group.active = group.sessions.filter(s => !bookmarks.has(s.id) && running.has(s.id));
       group.historical = group.sessions.filter(
-        s => !running.has(s.id) && s.lastActivity >= ageCutoff
+        s => !bookmarks.has(s.id) && !running.has(s.id) && s.lastActivity >= ageCutoff
       );
     }
     unmatched.sort((a, b) => b.lastActivity - a.lastActivity);
