@@ -2,7 +2,7 @@
   "name": "vswt",
   "displayName": "Worktree Sessions for Claude Code",
   "description": "A sidebar tree of your git worktrees and the Claude Code sessions in each — see which are running, resume past ones in a click, and create / diff / pull / push / PR / finish worktrees, across one repo or a whole folder of projects.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "vana123",
   "license": "MIT",
   "engines": {

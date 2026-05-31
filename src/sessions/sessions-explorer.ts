@@ -98,7 +98,8 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): { refresh:
     deps.getSessionNames,
     getTerminals,
     deps.getBookmarks,
-    worktreePath => prCache.get(worktreePath, () => provider.refresh())
+    worktreePath => prCache.get(worktreePath, () => provider.refresh()),
+    context.extensionUri
   );
   const treeView = vscode.window.createTreeView('vswt.sessions', {
     treeDataProvider: provider,

@@ -13,3 +13,5 @@ esbuild.mjs
 .eslintrc*
 .prettierrc*
 media/marketplace-icon.svg
+media/_claude-source.png
+media/claude.svg

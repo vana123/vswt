@@ -4,6 +4,14 @@ All notable changes to Worktree Sessions for Claude Code will be documented in t
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.2] — 2026-05-31
+
+### Changed
+- **Session row icons.** Each Claude session in the tree now shows the Claude
+  Code mark instead of a generic chat bubble — a static PNG when idle, and an
+  animated pulse GIF when the session is running (replacing the green dot).
+  Bookmarked sessions still show the star.
+
 ## [0.2.1] — 2026-05-31
 
 ### Changed

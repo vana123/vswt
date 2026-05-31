@@ -92,7 +92,8 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     private readonly getSessionNames: () => Record<string, string>,
     private readonly getTerminals: (worktreePath: string) => TerminalRef[],
     private readonly getBookmarks: () => Set<string>,
-    private readonly getPR: (worktreePath: string) => PRStatusInfo | null | undefined
+    private readonly getPR: (worktreePath: string) => PRStatusInfo | null | undefined,
+    private readonly extensionUri: vscode.Uri
   ) {}
 
   refresh(): void {
@@ -439,17 +440,16 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     item.id = 'sess:' + session.filePath;
     const rel = formatRelativeTime(session.lastActivity);
     item.description = active ? `running · ${rel}` : rel;
-    // Bookmark wins for icon (so it's recognizable in the pinned strip);
-    // running state is still conveyed through "running · …" in description.
+    // Bookmark wins for icon (so it's recognizable in the pinned strip).
+    // Otherwise: animated Claude mark when running, static when idle.
     if (bookmarked) {
       item.iconPath = new vscode.ThemeIcon(
         'star-full',
         new vscode.ThemeColor(active ? 'charts.green' : 'charts.yellow')
       );
-    } else if (active) {
-      item.iconPath = new vscode.ThemeIcon('circle-filled', new vscode.ThemeColor('charts.green'));
     } else {
-      item.iconPath = new vscode.ThemeIcon('comment-discussion');
+      const asset = active ? 'claude-running.gif' : 'claude.png';
+      item.iconPath = vscode.Uri.joinPath(this.extensionUri, 'media', asset);
     }
     item.contextValue = bookmarked ? 'vswtSessionsSession.bookmarked' : 'vswtSessionsSession.unbookmarked';
     item.command = {
