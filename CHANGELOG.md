@@ -4,6 +4,44 @@ All notable changes to Worktree Sessions for Claude Code will be documented in t
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] — 2026-06-02
+
+### Added
+- **Open PRs section per repo.** A new collapsible `Open PRs · N` node
+  appears under each repo, listing GitHub pull requests that don't yet
+  have a local worktree (PRs whose branch *is* checked out keep their
+  badge on the worktree row — no duplicates). Powered by `gh pr list`
+  with a 120s cache and background refresh.
+- **Checkout PR into Worktree.** Right-click an open PR →
+  *Checkout into Worktree* creates `<repo>/.claude/worktrees/pr-<n>`
+  tracking `origin/<branch>`, with a `gh pr checkout` fallback for
+  fork PRs. After checkout the PR moves out of the list and into the
+  normal worktree tree (and a toast offers *Open in New Window*).
+  Companion actions: *Open in Browser*, *Copy URL*.
+- **Sync with Base Branch.** New worktree action (icon `$(git-merge)`)
+  next to Pull/Push/Fetch. Picks the base from the saved value, then
+  `origin/HEAD`, then a branch QuickPick; fetches; runs
+  `git merge --no-ff origin/<base>`. On conflict, a warning toast
+  offers *Abort Merge*. The standard *Pull* still does `--ff-only` on
+  the current branch — *Sync with Base* is the "merge main into my
+  feature" path that used to live in the terminal.
+- **Merge-conflict indication in Changes.** Conflicting files
+  (`UU/AA/DD/AU/UA/DU/UD`) now render with a warning icon
+  (`gitDecoration.conflictingResourceForeground`) and a `conflict`
+  description, distinct from regular modified/added/deleted files. The
+  worktree badge prefixes `⚠N` before the dirty/ahead/behind counters
+  and the tooltip lists the unresolved count, so a conflicted state is
+  visible at a glance without expanding the tree.
+
+### Fixed
+- **Claude shell terminal no longer doubles up with its session row.**
+  Opening *New Claude Session Here* used to show `claude:<branch> · terminal`
+  immediately, and then a second row when the session's transcript file
+  appeared — two nodes for one running Claude. The shell is now
+  auto-attached to the next running session in that worktree: the
+  terminal row hides, the session row stands in for it, and *Resume*
+  reuses the same terminal.
+
 ## [0.3.0] — 2026-05-31
 
 ### Added
