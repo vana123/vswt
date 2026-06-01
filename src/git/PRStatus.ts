@@ -15,8 +15,23 @@ export interface PRStatusInfo {
   checks: PRChecksState;
 }
 
+export interface OpenPRInfo {
+  number: number;
+  title: string;
+  author: string;
+  headRefName: string;
+  isDraft: boolean;
+  url: string;
+}
+
 interface CacheEntry {
   status: PRStatusInfo | null;
+  fetchedAt: number;
+  inflight?: Promise<void>;
+}
+
+interface ListEntry {
+  list: OpenPRInfo[];
   fetchedAt: number;
   inflight?: Promise<void>;
 }
@@ -28,6 +43,7 @@ interface CacheEntry {
  */
 export class PRStatusCache {
   private readonly entries = new Map<string, CacheEntry>();
+  private readonly lists = new Map<string, ListEntry>();
   private ghMissing = false;
 
   get(worktreePath: string, onUpdated: () => void): PRStatusInfo | null | undefined {
@@ -43,8 +59,27 @@ export class PRStatusCache {
     return entry ? entry.status : undefined;
   }
 
-  invalidate(): void {
-    this.entries.clear();
+  listOpen(repoRoot: string, onUpdated: () => void): OpenPRInfo[] | undefined {
+    if (this.ghMissing) return [];
+    const entry = this.lists.get(repoRoot);
+    const fresh = entry && Date.now() - entry.fetchedAt < TTL_MS;
+    if (!fresh && !entry?.inflight) {
+      const promise = this.fetchListAndStore(repoRoot, onUpdated);
+      const seed: ListEntry = entry ?? { list: [], fetchedAt: 0 };
+      seed.inflight = promise;
+      this.lists.set(repoRoot, seed);
+    }
+    return entry ? entry.list : undefined;
+  }
+
+  invalidate(scope?: { worktree?: string; repoRoot?: string }): void {
+    if (!scope) {
+      this.entries.clear();
+      this.lists.clear();
+      return;
+    }
+    if (scope.worktree !== undefined) this.entries.delete(scope.worktree);
+    if (scope.repoRoot !== undefined) this.lists.delete(scope.repoRoot);
   }
 
   private async fetchAndStore(worktreePath: string, onUpdated: () => void): Promise<void> {
@@ -74,6 +109,46 @@ export class PRStatusCache {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') this.ghMissing = true;
     }
     this.entries.set(worktreePath, { status, fetchedAt: Date.now() });
+    onUpdated();
+  }
+
+  private async fetchListAndStore(repoRoot: string, onUpdated: () => void): Promise<void> {
+    let list: OpenPRInfo[] = [];
+    try {
+      const { stdout } = await execFileAsync(
+        'gh',
+        [
+          'pr',
+          'list',
+          '--state',
+          'open',
+          '--limit',
+          '50',
+          '--json',
+          'number,title,author,headRefName,isDraft,url'
+        ],
+        { cwd: repoRoot, maxBuffer: MAX_BUFFER }
+      );
+      const parsed = JSON.parse(stdout) as Array<{
+        number: number;
+        title?: string;
+        author?: { login?: string };
+        headRefName?: string;
+        isDraft?: boolean;
+        url?: string;
+      }>;
+      list = parsed.map(p => ({
+        number: p.number,
+        title: p.title ?? '',
+        author: p.author?.login ?? '',
+        headRefName: p.headRefName ?? '',
+        isDraft: p.isDraft ?? false,
+        url: p.url ?? ''
+      }));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') this.ghMissing = true;
+    }
+    this.lists.set(repoRoot, { list, fetchedAt: Date.now() });
     onUpdated();
   }
 }

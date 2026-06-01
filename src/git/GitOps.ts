@@ -27,6 +27,7 @@ export interface WorktreeStatus {
   untracked: number;
   ahead: number;
   behind: number;
+  conflicts: number;
 }
 
 export interface BranchInfo {
@@ -254,6 +255,21 @@ export class GitOps {
     return this.git(...args);
   }
 
+  async mergeAbort(): Promise<void> {
+    await this.git('merge', '--abort');
+  }
+
+  /** Short name of origin's default branch (e.g. "main"), or null when unset. */
+  async defaultBaseBranch(): Promise<string | null> {
+    try {
+      const out = (await this.git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD')).trim();
+      // strips the "origin/" prefix to return just the branch name.
+      return out.startsWith('origin/') ? out.slice('origin/'.length) : out || null;
+    } catch {
+      return null;
+    }
+  }
+
   async mergeSquash(branch: string, message: string): Promise<void> {
     await this.git('merge', '--squash', branch);
     await this.git('commit', '-m', message);
@@ -294,6 +310,7 @@ function parseStatusInfo(text: string): WorktreeStatus {
   let untracked = 0;
   let ahead = 0;
   let behind = 0;
+  let conflicts = 0;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/\r$/, '');
     if (!line.trim()) continue;
@@ -308,10 +325,23 @@ function parseStatusInfo(text: string): WorktreeStatus {
     } else {
       const code = line.slice(0, 2);
       if (code === '??') untracked++;
+      else if (isUnmergedCode(code)) conflicts++;
       else if (code.trim()) modified++;
     }
   }
-  return { branch, modified, untracked, ahead, behind };
+  return { branch, modified, untracked, ahead, behind, conflicts };
+}
+
+// `git status` unmerged codes: both sides non-space and at least one is U,
+// plus the "both added" / "both deleted" pairs.
+export function isUnmergedCode(code: string): boolean {
+  if (code.length < 2) return false;
+  const x = code[0];
+  const y = code[1];
+  if (x === 'U' || y === 'U') return true;
+  if (x === 'A' && y === 'A') return true;
+  if (x === 'D' && y === 'D') return true;
+  return false;
 }
 
 function parseWorktreePorcelain(text: string): WorktreeInfo[] {

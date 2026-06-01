@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { CommitInfo, FileChange, GitOps, WorktreeInfo, WorktreeStatus } from '../git/GitOps';
-import { formatPRBadge, PRStatusInfo } from '../git/PRStatus';
+import { CommitInfo, FileChange, GitOps, isUnmergedCode, WorktreeInfo, WorktreeStatus } from '../git/GitOps';
+import { formatPRBadge, OpenPRInfo, PRStatusInfo } from '../git/PRStatus';
 import { ClaudeSession, SessionScanner } from './session-scanner';
 import { normalizePath, realpathSafe } from './path-utils';
 import { escapeMarkdown, formatRelativeTime, shortenHomePath, truncate } from './format-utils';
@@ -73,6 +73,8 @@ export type SessionsNode =
     }
   | { kind: 'historicalGroup'; worktreePath: string; count: number }
   | { kind: 'sessionsMore'; worktreePath: string; count: number }
+  | { kind: 'openPRsGroup'; repoRoot: string; count: number }
+  | { kind: 'openPR'; repoRoot: string; pr: OpenPRInfo }
   | { kind: 'unmatched'; count: number };
 
 const { Collapsed, Expanded, None } = vscode.TreeItemCollapsibleState;
@@ -93,6 +95,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     private readonly getTerminals: (worktreePath: string) => TerminalRef[],
     private readonly getBookmarks: () => Set<string>,
     private readonly getPR: (worktreePath: string) => PRStatusInfo | null | undefined,
+    private readonly getOpenPRs: (repoRoot: string) => OpenPRInfo[] | undefined,
     private readonly extensionUri: vscode.Uri,
     private readonly noteRunningSessions: (runningByWorktree: Map<string, string[]>) => void
   ) {}
@@ -124,7 +127,19 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
 
     if (element.kind === 'repo') {
       const repo = model.repos.find(r => r.repoRoot === element.repoRoot);
-      return repo ? repo.groups.map(group => ({ kind: 'worktree', group })) : [];
+      if (!repo) return [];
+      const nodes: SessionsNode[] = repo.groups.map(group => ({ kind: 'worktree', group }));
+      const openPRs = this.openPRsFor(repo);
+      if (openPRs.length > 0) {
+        nodes.push({ kind: 'openPRsGroup', repoRoot: repo.repoRoot, count: openPRs.length });
+      }
+      return nodes;
+    }
+
+    if (element.kind === 'openPRsGroup') {
+      const repo = model.repos.find(r => r.repoRoot === element.repoRoot);
+      if (!repo) return [];
+      return this.openPRsFor(repo).map(pr => ({ kind: 'openPR', repoRoot: repo.repoRoot, pr }));
     }
 
     if (element.kind === 'worktree') {
@@ -313,7 +328,39 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
         item.tooltip = 'Sessions whose working directory is not a worktree of any listed repository.';
         return item;
       }
+      case 'openPRsGroup': {
+        const item = new vscode.TreeItem('Open PRs', Collapsed);
+        item.id = 'openPRs:' + node.repoRoot;
+        item.description = String(node.count);
+        item.iconPath = new vscode.ThemeIcon('git-pull-request');
+        item.contextValue = 'vswtSessionsOpenPRsGroup';
+        item.tooltip = 'Open GitHub pull requests without a local worktree.';
+        return item;
+      }
+      case 'openPR':
+        return this.openPRItem(node);
     }
+  }
+
+  private openPRItem(node: Extract<SessionsNode, { kind: 'openPR' }>): vscode.TreeItem {
+    const { pr } = node;
+    const item = new vscode.TreeItem(truncate(pr.title || `#${pr.number}`, 70), None);
+    item.id = 'openPR:' + node.repoRoot + ':' + pr.number;
+    const descParts = [`#${pr.number}`];
+    if (pr.isDraft) descParts.push('draft');
+    if (pr.author) descParts.push(pr.author);
+    item.description = descParts.join(' · ');
+    item.iconPath = pr.isDraft
+      ? new vscode.ThemeIcon('git-pull-request-draft', new vscode.ThemeColor('charts.gray'))
+      : new vscode.ThemeIcon('git-pull-request');
+    item.contextValue = 'vswtSessionsOpenPR';
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`**${escapeMarkdown(pr.title || `#${pr.number}`)}**\n\n`);
+    md.appendMarkdown(`- [#${pr.number}](${pr.url})${pr.isDraft ? ' · draft' : ''}\n`);
+    if (pr.author) md.appendMarkdown(`- author: ${escapeMarkdown(pr.author)}\n`);
+    md.appendMarkdown(`- branch: \`${pr.headRefName}\`\n`);
+    item.tooltip = md;
+    return item;
   }
 
   private worktreeItem(group: WorktreeGroup): vscode.TreeItem {
@@ -371,6 +418,9 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
       md.appendMarkdown(
         `- changes: ${status.modified} modified, ${status.untracked} untracked · ↑${status.ahead} ↓${status.behind}\n`
       );
+      if (status.conflicts > 0) {
+        md.appendMarkdown(`- ⚠ ${status.conflicts} unresolved merge conflict(s)\n`);
+      }
     }
     if (flags.length) md.appendMarkdown(`- flags: ${flags.join(', ')}\n`);
     md.appendMarkdown(
@@ -394,7 +444,11 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     const item = new vscode.TreeItem(file.path, None);
     item.iconPath = fileIcon(file.status);
     item.contextValue = 'vswtSessionsFile';
-    item.tooltip = `${file.status.trim()} · ${file.path}`;
+    const unmerged = isUnmergedCode(file.status);
+    item.tooltip = unmerged
+      ? `merge conflict (${file.status.trim()}) · ${file.path}\nopen and resolve in the merge editor`
+      : `${file.status.trim()} · ${file.path}`;
+    if (unmerged) item.description = 'conflict';
     item.command = {
       command: 'vswt.wt.showDiff',
       title: 'Open Diff',
@@ -591,12 +645,25 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     if (plain) return plain;
     return map.get(normalizePath(await realpathSafe(session.cwd))) ?? null;
   }
+
+  // Drop PRs whose head branch already has a local worktree — those still
+  // show up as a badge on that worktree, no need to duplicate them here.
+  private openPRsFor(repo: RepoModel): OpenPRInfo[] {
+    const list = this.getOpenPRs(repo.repoRoot);
+    if (!list || list.length === 0) return [];
+    const localBranches = new Set<string>();
+    for (const g of repo.groups) {
+      if (g.info.branch) localBranches.add(g.info.branch);
+    }
+    return list.filter(pr => !localBranches.has(pr.headRefName));
+  }
 }
 
 function badgeText(status: WorktreeStatus | null): string {
   if (!status) return '';
   const dirty = status.modified + status.untracked;
   const parts: string[] = [];
+  if (status.conflicts > 0) parts.push(`⚠${status.conflicts}`);
   if (dirty > 0) parts.push(`●${dirty}`);
   if (status.ahead > 0) parts.push(`↑${status.ahead}`);
   if (status.behind > 0) parts.push(`↓${status.behind}`);
@@ -604,6 +671,12 @@ function badgeText(status: WorktreeStatus | null): string {
 }
 
 function fileIcon(code: string): vscode.ThemeIcon {
+  if (isUnmergedCode(code)) {
+    return new vscode.ThemeIcon(
+      'warning',
+      new vscode.ThemeColor('gitDecoration.conflictingResourceForeground')
+    );
+  }
   const t = code.trim();
   if (t.startsWith('?') || t.startsWith('A')) return new vscode.ThemeIcon('diff-added');
   if (t.startsWith('D') || t.endsWith('D')) return new vscode.ThemeIcon('diff-removed');

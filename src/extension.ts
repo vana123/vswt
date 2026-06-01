@@ -7,7 +7,8 @@ import { GitOps } from './git/GitOps';
 import { WorktreeManager } from './git/WorktreeManager';
 import { initSettings } from './Settings';
 import { normalizePath } from './sessions/path-utils';
-import { registerSessionsExplorer } from './sessions/sessions-explorer';
+import { registerSessionsExplorer, SessionsExplorerHandle } from './sessions/sessions-explorer';
+import { OpenPRInfo, PRStatusCache } from './git/PRStatus';
 import { registerUsage } from './usage';
 
 const execFileAsync = promisify(execFile);
@@ -589,6 +590,176 @@ async function createPRFlow(
   }
 }
 
+async function checkoutPRFlow(
+  repoRoot: string,
+  pr: OpenPRInfo,
+  output: vscode.OutputChannel,
+  prCache: PRStatusCache,
+  refresh: () => Promise<void>
+): Promise<void> {
+  const target = path.join(repoRoot, '.claude', 'worktrees', `pr-${pr.number}`);
+  try {
+    await fs.access(target);
+    void vscode.window.showErrorMessage(
+      `vsWT: PR #${pr.number} already has a worktree at ${target}`
+    );
+    return;
+  } catch {
+    // target doesn't exist — good, we can create it
+  }
+
+  output.show(true);
+  output.appendLine(`[vsWT] checkout PR #${pr.number} (${pr.headRefName}) → ${target}`);
+
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `vsWT: checkout PR #${pr.number}`,
+      cancellable: false
+    },
+    async () => {
+      try {
+        // Same-repo PR: track origin/<branch> directly.
+        await execFileAsync(
+          'git',
+          ['worktree', 'add', '--track', '-b', pr.headRefName, target, `origin/${pr.headRefName}`],
+          { cwd: repoRoot, maxBuffer: 5 * 1024 * 1024 }
+        );
+        output.appendLine(`[vsWT] ✓ worktree added`);
+      } catch (sameRepoErr) {
+        // Fall back to a detached worktree + `gh pr checkout` — handles forks
+        // where origin/<branch> doesn't exist on this remote.
+        const sameMsg = (sameRepoErr as Error).message.split('\n')[0];
+        output.appendLine(`[vsWT] same-repo add failed (${sameMsg}); falling back to gh pr checkout`);
+        try {
+          await execFileAsync('git', ['worktree', 'add', '--detach', target], {
+            cwd: repoRoot,
+            maxBuffer: 5 * 1024 * 1024
+          });
+          await execFileAsync('gh', ['pr', 'checkout', String(pr.number)], {
+            cwd: target,
+            maxBuffer: 5 * 1024 * 1024
+          });
+          output.appendLine(`[vsWT] ✓ worktree added via gh pr checkout`);
+        } catch (forkErr) {
+          const msg = (forkErr as Error).message.split('\n')[0];
+          output.appendLine(`[vsWT] ERROR: ${msg}`);
+          void vscode.window.showErrorMessage(`vsWT: PR checkout failed — ${msg}`);
+          return;
+        }
+      }
+
+      prCache.invalidate({ repoRoot });
+      prCache.invalidate({ worktree: target });
+      await refresh();
+
+      const action = await vscode.window.showInformationMessage(
+        `vsWT: PR #${pr.number} checked out at ${target}`,
+        'Open in New Window'
+      );
+      if (action === 'Open in New Window') {
+        void vscode.commands.executeCommand(
+          'vscode.openFolder',
+          vscode.Uri.file(target),
+          { forceNewWindow: true }
+        );
+      }
+    }
+  );
+}
+
+async function syncWithBaseFlow(
+  worktreePath: string,
+  bases: Record<string, string>,
+  output: vscode.OutputChannel,
+  refresh: () => Promise<void>
+): Promise<void> {
+  const git = new GitOps(worktreePath);
+
+  let base: string | undefined = bases[worktreePath];
+  if (!base) {
+    const fallback = await git.defaultBaseBranch();
+    if (fallback) base = fallback;
+  }
+  if (!base) {
+    const branches = await git.listBranches(true);
+    const current = await git.currentBranch();
+    const items = branches
+      .filter(b => !b.isCurrent && b.name !== current)
+      .map(b => ({ label: b.name }));
+    const pick = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Pick the base branch to sync from'
+    });
+    if (!pick) return;
+    base = pick.label;
+  }
+
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `vsWT: sync with ${base}`,
+      cancellable: false
+    },
+    async () => {
+      output.show(true);
+      output.appendLine(`[vsWT] sync ${worktreePath} ← ${base}`);
+
+      try {
+        const fetchOut = await git.fetch();
+        if (fetchOut.trim()) output.append(fetchOut);
+      } catch (err) {
+        // continue — local refs might still be enough to merge.
+        output.appendLine(`[vsWT] fetch failed: ${(err as Error).message.split('\n')[0]}`);
+      }
+
+      // Prefer the remote-tracking ref so we pull in upstream commits, not just
+      // the local copy of the base branch (which may itself be stale).
+      let ref = `origin/${base}`;
+      if (!(await git.refExists(`refs/remotes/${ref}`))) {
+        if (await git.branchExists(base!)) {
+          ref = base!;
+        } else {
+          void vscode.window.showErrorMessage(
+            `vsWT: base '${base}' not found on origin or locally`
+          );
+          return;
+        }
+      }
+
+      try {
+        const out = await git.merge(ref, true);
+        if (out.trim()) output.append(out);
+        output.appendLine(`[vsWT] ✓ merged ${ref}`);
+        void vscode.window.showInformationMessage(`vsWT: synced with ${ref}`);
+      } catch (err) {
+        const fullMsg = (err as Error).message;
+        const isConflict = /CONFLICT|Automatic merge failed|Resolve all conflicts|fix conflicts/i.test(fullMsg);
+        if (isConflict) {
+          output.appendLine(`[vsWT] merge has conflicts — resolve in Changes`);
+          const action = await vscode.window.showWarningMessage(
+            `vsWT: merge with ${ref} has conflicts — open files under "Changes", resolve, then commit.`,
+            'Abort Merge'
+          );
+          if (action === 'Abort Merge') {
+            try {
+              await git.mergeAbort();
+              output.appendLine(`[vsWT] ✓ merge aborted`);
+            } catch (abortErr) {
+              output.appendLine(`[vsWT] merge --abort failed: ${(abortErr as Error).message}`);
+            }
+          }
+        } else {
+          const head = fullMsg.split('\n')[0] ?? 'unknown';
+          output.appendLine(`[vsWT] merge failed: ${fullMsg}`);
+          void vscode.window.showErrorMessage(`vsWT: merge failed — ${head}`);
+        }
+      }
+
+      await refresh();
+    }
+  );
+}
+
 async function syncWorktreeFlow(
   worktreePath: string,
   op: 'push' | 'pull' | 'fetch',
@@ -652,7 +823,8 @@ export function activate(context: vscode.ExtensionContext): void {
     treeRefresh();
   };
 
-  const explorer = registerSessionsExplorer({
+  let explorer: SessionsExplorerHandle;
+  explorer = registerSessionsExplorer({
     context,
     output,
     getRepos: () => discoverRepos(getRepoScanDepth()),
@@ -694,9 +866,11 @@ export function activate(context: vscode.ExtensionContext): void {
       await refresh();
     },
     sync: (worktreePath, op) => syncWorktreeFlow(worktreePath, op, output, refresh),
+    syncWithBase: worktreePath => syncWithBaseFlow(worktreePath, getBases(context), output, refresh),
     showDiff: (worktreePath, relativePath, statusCode) =>
       showFileDiffFlow(worktreePath, relativePath, statusCode),
     createPR: worktreePath => createPRFlow(worktreePath, output, refresh),
+    checkoutPR: (repoRoot, pr) => checkoutPRFlow(repoRoot, pr, output, explorer.prCache, refresh),
     finish: (worktreePath, repoRoot) => finishWorktreeFlow(worktreePath, repoRoot, context, output, refresh),
     openWindow: targetPath => {
       void vscode.commands.executeCommand(

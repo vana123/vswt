@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { getSettings } from '../Settings';
 import { readClipboardImage, formatImageReference } from '../clipboard';
-import { PRStatusCache } from '../git/PRStatus';
+import { OpenPRInfo, PRStatusCache } from '../git/PRStatus';
 import { SessionScanner, SessionSearchMatch } from './session-scanner';
 import { formatRelativeTime, truncate } from './format-utils';
 import { SessionsConfig, SessionsNode, SessionsTreeProvider, TerminalRef } from './sessions-tree-provider';
@@ -22,8 +22,10 @@ export interface SessionsExplorerDeps {
   remove: (worktreePath: string, repoRoot: string) => Promise<void>;
   togglePin: (worktreePath: string) => Promise<void>;
   sync: (worktreePath: string, op: 'push' | 'pull' | 'fetch') => Promise<void>;
+  syncWithBase: (worktreePath: string) => Promise<void>;
   showDiff: (worktreePath: string, relativePath: string, statusCode: string) => Promise<void>;
   createPR: (worktreePath: string) => Promise<void>;
+  checkoutPR: (repoRoot: string, pr: OpenPRInfo) => Promise<void>;
   finish: (worktreePath: string, repoRoot: string) => Promise<void>;
   openWindow: (targetPath: string) => void;
 }
@@ -71,6 +73,7 @@ export interface SessionsExplorerHandle {
   treeView: vscode.TreeView<SessionsNode>;
   projectsDir: () => string;
   onProjectsDirChange: vscode.Event<string>;
+  prCache: PRStatusCache;
 }
 
 export function registerSessionsExplorer(deps: SessionsExplorerDeps): SessionsExplorerHandle {
@@ -152,6 +155,7 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): SessionsEx
     getTerminals,
     deps.getBookmarks,
     worktreePath => prCache.get(worktreePath, () => provider.refresh()),
+    repoRoot => prCache.listOpen(repoRoot, () => provider.refresh()),
     context.extensionUri,
     noteRunningSessions
   );
@@ -396,6 +400,8 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): SessionsEx
     node && node.kind === 'file' ? node : null;
   const asRepo = (node?: SessionsNode): Extract<SessionsNode, { kind: 'repo' }> | null =>
     node && node.kind === 'repo' ? node : null;
+  const asOpenPR = (node?: SessionsNode): Extract<SessionsNode, { kind: 'openPR' }> | null =>
+    node && node.kind === 'openPR' ? node : null;
 
   const branchOf = (node: Extract<SessionsNode, { kind: 'worktree' }>): string =>
     node.group.info.branch ?? 'detached';
@@ -509,6 +515,10 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): SessionsEx
       const t = asWorktree(node);
       if (t) void deps.sync(t.group.info.path, 'fetch');
     }),
+    vscode.commands.registerCommand('vswt.wt.syncWithBase', (node?: SessionsNode) => {
+      const t = asWorktree(node);
+      if (t) void deps.syncWithBase(t.group.info.path);
+    }),
     vscode.commands.registerCommand('vswt.wt.openWindow', (node?: SessionsNode) => {
       const t = asWorktree(node);
       if (t) deps.openWindow(t.group.info.path);
@@ -592,6 +602,22 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): SessionsEx
     vscode.commands.registerCommand('vswt.sessions.unbookmark', (node?: SessionsNode) => {
       const t = asSession(node);
       if (t) void deps.toggleBookmark(t.session.id);
+    }),
+
+    // Open-PR actions
+    vscode.commands.registerCommand('vswt.openPR.checkout', (node?: SessionsNode) => {
+      const t = asOpenPR(node);
+      if (t) void deps.checkoutPR(t.repoRoot, t.pr);
+    }),
+    vscode.commands.registerCommand('vswt.openPR.openInBrowser', (node?: SessionsNode) => {
+      const t = asOpenPR(node);
+      if (t) void vscode.env.openExternal(vscode.Uri.parse(t.pr.url));
+    }),
+    vscode.commands.registerCommand('vswt.openPR.copyUrl', async (node?: SessionsNode) => {
+      const t = asOpenPR(node);
+      if (!t) return;
+      await vscode.env.clipboard.writeText(t.pr.url);
+      void vscode.window.showInformationMessage(`vsWT: copied PR url for #${t.pr.number}`);
     })
   );
 
@@ -601,6 +627,7 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): SessionsEx
     refresh: () => provider.refresh(),
     treeView,
     projectsDir: () => scanner.resolveProjectsDir(),
-    onProjectsDirChange: projectsDirEmitter.event
+    onProjectsDirChange: projectsDirEmitter.event,
+    prCache
   };
 }

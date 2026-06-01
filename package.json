@@ -147,6 +147,24 @@
         "icon": "$(copy)"
       },
       {
+        "command": "vswt.openPR.checkout",
+        "title": "Checkout PR into Worktree",
+        "category": "Worktree Sessions",
+        "icon": "$(git-pull-request-go-to-changes)"
+      },
+      {
+        "command": "vswt.openPR.openInBrowser",
+        "title": "Open PR in Browser",
+        "category": "Worktree Sessions",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "vswt.openPR.copyUrl",
+        "title": "Copy PR URL",
+        "category": "Worktree Sessions",
+        "icon": "$(copy)"
+      },
+      {
         "command": "vswt.wt.newClaude",
         "title": "New Claude Session Here",
         "category": "Worktree Sessions",
@@ -180,6 +198,12 @@
         "title": "Fetch",
         "category": "Worktree Sessions",
         "icon": "$(sync)"
+      },
+      {
+        "command": "vswt.wt.syncWithBase",
+        "title": "Sync with Base Branch",
+        "category": "Worktree Sessions",
+        "icon": "$(git-merge)"
       },
       {
         "command": "vswt.wt.openWindow",
@@ -354,6 +378,11 @@
           "group": "2_git@3"
         },
         {
+          "command": "vswt.wt.syncWithBase",
+          "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
+          "group": "2_git@4"
+        },
+        {
           "command": "vswt.wt.openWindow",
           "when": "view == vswt.sessions && viewItem =~ /^vswtSessionsWorktree/",
           "group": "3_manage@1"
@@ -442,6 +471,31 @@
           "command": "vswt.commits.copySha",
           "when": "view == vswt.sessions && viewItem == vswtSessionsCommit",
           "group": "inline@1"
+        },
+        {
+          "command": "vswt.openPR.checkout",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsOpenPR",
+          "group": "inline@1"
+        },
+        {
+          "command": "vswt.openPR.openInBrowser",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsOpenPR",
+          "group": "inline@2"
+        },
+        {
+          "command": "vswt.openPR.checkout",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsOpenPR",
+          "group": "1_pr@1"
+        },
+        {
+          "command": "vswt.openPR.openInBrowser",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsOpenPR",
+          "group": "1_pr@2"
+        },
+        {
+          "command": "vswt.openPR.copyUrl",
+          "when": "view == vswt.sessions && viewItem == vswtSessionsOpenPR",
+          "group": "1_pr@3"
         }
       ],
       "commandPalette": [
@@ -478,6 +532,18 @@
           "when": "false"
         },
         {
+          "command": "vswt.openPR.checkout",
+          "when": "false"
+        },
+        {
+          "command": "vswt.openPR.openInBrowser",
+          "when": "false"
+        },
+        {
+          "command": "vswt.openPR.copyUrl",
+          "when": "false"
+        },
+        {
           "command": "vswt.wt.newClaude",
           "when": "false"
         },
@@ -499,6 +565,10 @@
         },
         {
           "command": "vswt.wt.fetch",
+          "when": "false"
+        },
+        {
+          "command": "vswt.wt.syncWithBase",
           "when": "false"
         },
         {
