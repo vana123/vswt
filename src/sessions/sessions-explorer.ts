@@ -80,18 +80,64 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): SessionsEx
   // fires inside terminals this extension created.
   const ownTerminals = new Set<vscode.Terminal>();
   const sessionTerminals = new Map<string, vscode.Terminal>();
+  interface OwnTerminalInfo {
+    worktreePath: string;
+    label: string;
+    icon?: string;
+    // claude shell awaiting a session — eligible for auto-attach.
+    claudeAttach?: boolean;
+    // Once attached, the terminal is the live console of this session and
+    // is hidden as a standalone row (the session row stands in for it).
+    claudeSessionId?: string;
+  }
   // Tree-leaf terminals attached to a worktree. Resume terminals are NOT here
   // — they already appear under the session node.
-  const ownTerminalInfo = new Map<vscode.Terminal, { worktreePath: string; label: string; icon?: string }>();
+  const ownTerminalInfo = new Map<vscode.Terminal, OwnTerminalInfo>();
 
   const getTerminals = (worktreePath: string): TerminalRef[] => {
     const out: TerminalRef[] = [];
     for (const [term, info] of ownTerminalInfo) {
       if (info.worktreePath !== worktreePath) continue;
       if (term.exitStatus !== undefined) continue;
+      if (info.claudeSessionId !== undefined) continue;
       out.push({ terminal: term, label: info.label, ...(info.icon ? { icon: info.icon } : {}) });
     }
     return out;
+  };
+
+  const noteRunningSessions = (runningByWorktree: Map<string, string[]>): void => {
+    // Drop attachments whose session is no longer in the running registry
+    // for that worktree (process exited / crashed) so the terminal becomes
+    // a regular row again.
+    for (const info of ownTerminalInfo.values()) {
+      if (info.claudeSessionId === undefined) continue;
+      const live = runningByWorktree.get(info.worktreePath);
+      if (!live || !live.includes(info.claudeSessionId)) {
+        sessionTerminals.delete(info.claudeSessionId);
+        delete info.claudeSessionId;
+      }
+    }
+    // For each worktree, attach pending claude shells to running sessions
+    // that aren't yet linked to any terminal.
+    for (const [worktreePath, runningIds] of runningByWorktree) {
+      const taken = new Set<string>();
+      for (const info of ownTerminalInfo.values()) {
+        if (info.worktreePath === worktreePath && info.claudeSessionId) {
+          taken.add(info.claudeSessionId);
+        }
+      }
+      const unassigned = runningIds.filter(id => !taken.has(id));
+      if (unassigned.length === 0) continue;
+      for (const [term, info] of ownTerminalInfo) {
+        if (info.worktreePath !== worktreePath) continue;
+        if (!info.claudeAttach || info.claudeSessionId) continue;
+        if (term.exitStatus !== undefined) continue;
+        const id = unassigned.shift();
+        if (!id) break;
+        info.claudeSessionId = id;
+        sessionTerminals.set(id, term);
+      }
+    }
   };
 
   const scanner = new SessionScanner(getProjectsDir());
@@ -106,7 +152,8 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): SessionsEx
     getTerminals,
     deps.getBookmarks,
     worktreePath => prCache.get(worktreePath, () => provider.refresh()),
-    context.extensionUri
+    context.extensionUri,
+    noteRunningSessions
   );
   const treeView = vscode.window.createTreeView('vswt.sessions', {
     treeDataProvider: provider,
@@ -128,7 +175,7 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): SessionsEx
     shellPath?: string;
     icon?: string;
     send?: string;
-    attach?: { worktreePath: string; label: string; icon?: string };
+    attach?: { worktreePath: string; label: string; icon?: string; claudeAttach?: boolean };
   }): vscode.Terminal => {
     const tOpts: vscode.TerminalOptions = { name: opts.name };
     if (opts.cwd) tOpts.cwd = vscode.Uri.file(opts.cwd);
@@ -140,8 +187,13 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): SessionsEx
     if (opts.send) term.sendText(opts.send, true);
     updateTerminalContext(term);
     if (opts.attach) {
-      const { worktreePath, label, icon } = opts.attach;
-      ownTerminalInfo.set(term, { worktreePath, label, ...(icon ? { icon } : {}) });
+      const { worktreePath, label, icon, claudeAttach } = opts.attach;
+      ownTerminalInfo.set(term, {
+        worktreePath,
+        label,
+        ...(icon ? { icon } : {}),
+        ...(claudeAttach ? { claudeAttach: true } : {})
+      });
       provider.refresh();
     }
     return term;
@@ -420,7 +472,12 @@ export function registerSessionsExplorer(deps: SessionsExplorerDeps): SessionsEx
         cwd: t.group.info.path,
         icon: 'sparkle',
         send: getClaudePath(),
-        attach: { worktreePath: t.group.info.path, label: `claude:${branch}`, icon: 'sparkle' }
+        attach: {
+          worktreePath: t.group.info.path,
+          label: `claude:${branch}`,
+          icon: 'sparkle',
+          claudeAttach: true
+        }
       });
     }),
     vscode.commands.registerCommand('vswt.wt.newShell', (node?: SessionsNode) => {

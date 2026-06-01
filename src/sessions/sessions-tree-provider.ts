@@ -93,7 +93,8 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     private readonly getTerminals: (worktreePath: string) => TerminalRef[],
     private readonly getBookmarks: () => Set<string>,
     private readonly getPR: (worktreePath: string) => PRStatusInfo | null | undefined,
-    private readonly extensionUri: vscode.Uri
+    private readonly extensionUri: vscode.Uri,
+    private readonly noteRunningSessions: (runningByWorktree: Map<string, string[]>) => void
   ) {}
 
   refresh(): void {
@@ -558,6 +559,7 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
     const bookmarks = this.getBookmarks();
     const now = Date.now();
     const ageCutoff = cfg.maxAgeDays > 0 ? now - cfg.maxAgeDays * 86_400_000 : 0;
+    const runningByWorktree = new Map<string, string[]>();
     for (const group of allGroups) {
       group.sessions.sort((a, b) => b.lastActivity - a.lastActivity);
       group.bookmarked = group.sessions.filter(s => bookmarks.has(s.id));
@@ -565,7 +567,15 @@ export class SessionsTreeProvider implements vscode.TreeDataProvider<SessionsNod
       group.historical = group.sessions.filter(
         s => !bookmarks.has(s.id) && !running.has(s.id) && s.lastActivity >= ageCutoff
       );
+      // All running sessions for this worktree (incl. bookmarked) — used to
+      // attach claude-shell terminals so they don't render as a second row
+      // next to the live session.
+      runningByWorktree.set(
+        group.info.path,
+        group.sessions.filter(s => running.has(s.id)).map(s => s.id)
+      );
     }
+    this.noteRunningSessions(runningByWorktree);
     unmatched.sort((a, b) => b.lastActivity - a.lastActivity);
     repos.sort((a, b) => a.label.localeCompare(b.label));
 
